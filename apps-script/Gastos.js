@@ -53,13 +53,31 @@ function subir_(u, p) {
   const texto = leerArchivo_(archivo);
   const proveedores = leer_('Proveedores').filter(x => esVerdad_(x.activo));
   const d = analizarFactura_(texto, proveedores);
+  // Proveedor nuevo con NIF válido: se da de alta solo. Sin NIF fiable no se crea,
+  // para no llenar la lista de nombres mal leídos (el usuario lo crea con un toque).
+  let prov = d.proveedor || null;
+  let proveedorNuevo = false;
+  if (!prov && d.nif && nifValido_(d.nif)) {
+    prov = conBloqueo_(() => {
+      const existente = leer_('Proveedores').find(x => normNif_(x.nif) === d.nif);
+      if (existente) {
+        return esVerdad_(existente.activo) ? existente : actualizar_('Proveedores', existente.id, { activo: true });
+      }
+      proveedorNuevo = true;
+      return insertar_('Proveedores', {
+        id: nuevoId_(), nombre: d.nombreSugerido || 'Proveedor ' + d.nif, nif: d.nif,
+        categoria_habitual: d.categoria || '', activo: true, creado_en: new Date()
+      });
+    });
+    if (!d.categoria && prov.categoria_habitual) d.categoria = prov.categoria_habitual;
+  }
   const ahora = new Date();
   const gasto = {
     id,
     fecha: d.fecha || hoyISO_(),
-    proveedor_id: d.proveedor ? d.proveedor.id : '',
-    proveedor_nombre: d.proveedor ? d.proveedor.nombre : '',
-    nif: d.nif || '',
+    proveedor_id: prov ? prov.id : '',
+    proveedor_nombre: prov ? prov.nombre : '',
+    nif: prov ? prov.nif : (d.nif || ''),
     categoria: d.categoria || '',
     num_factura: d.num_factura || '',
     base: numero_(d.base),
@@ -82,7 +100,9 @@ function subir_(u, p) {
   return {
     gasto: limpiarGasto_(gasto),
     leido: !!texto,
-    sugerencia: { nombre: d.nombreSugerido || '', nif: d.proveedor ? '' : (d.nif || '') }
+    proveedor: prov ? limpiarProveedor_(prov) : null,
+    proveedorNuevo,
+    sugerencia: { nombre: d.nombreSugerido || '', nif: prov ? '' : (d.nif || '') }
   };
 }
 
@@ -137,7 +157,13 @@ function guardarGasto_(u, p) {
       }, cambios));
     }
     if (g.estado === 'confirmado' && g.archivo_id) ordenarArchivo_(g);
-    return { gasto: limpiarGasto_(g) };
+    // La primera factura confirmada de un proveedor fija su categoría habitual.
+    let provActualizado = null;
+    if (g.estado === 'confirmado' && prov && prov.categoria_habitual !== g.categoria) {
+      const tieneOtras = leer_('Gastos').some(x => x.id !== g.id && String(x.proveedor_id) === String(prov.id) && x.estado === 'confirmado');
+      if (!tieneOtras) provActualizado = actualizar_('Proveedores', prov.id, { categoria_habitual: g.categoria });
+    }
+    return { gasto: limpiarGasto_(g), proveedor: provActualizado ? limpiarProveedor_(provActualizado) : null };
   });
 }
 
@@ -187,7 +213,8 @@ function guardarProveedor_(u, p) {
     const cambios = { nombre, nif, categoria_habitual: d.categoria_habitual || '', activo: d.activo !== false };
     let r;
     if (d.id) {
-      soloDueno_(u);
+      // Los empleados pueden corregir nombre, NIF y categoría, pero no dar de baja.
+      if (u.rol !== 'dueno') delete cambios.activo;
       r = actualizar_('Proveedores', d.id, cambios);
     } else {
       r = insertar_('Proveedores', Object.assign({ id: nuevoId_(), creado_en: new Date() }, cambios));

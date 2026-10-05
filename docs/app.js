@@ -165,6 +165,12 @@ function reemplazarGasto(g) {
   guardarDatos();
 }
 
+function reemplazarProveedor(p) {
+  const lista = E.datos.proveedores = E.datos.proveedores || [];
+  const i = lista.findIndex(x => x.id === p.id);
+  if (i >= 0) lista[i] = p; else lista.push(p);
+}
+
 function cerrarSesionLocal() {
   E.token = null;
   E.datos = null;
@@ -470,9 +476,10 @@ async function procesarArchivo(input) {
   }
   const r = await api('subir', { archivo, origen }, 'Leyendo la factura… (tarda unos segundos)');
   E.datos.gastos.unshift(r.gasto);
+  if (r.proveedor) reemplazarProveedor(r.proveedor);
   guardarDatos();
   if (previa) E.vistaPrevia[r.gasto.id] = previa;
-  E.sugerencia[r.gasto.id] = r.sugerencia;
+  E.sugerencia[r.gasto.id] = Object.assign({}, r.sugerencia, { nuevo: !!r.proveedorNuevo });
   guardarLS('sugerencias', E.sugerencia);
   if (!r.leido) avisar('No se ha podido leer el texto. Rellena los datos a mano.', 'error');
   E.form = null;
@@ -529,9 +536,12 @@ function pintarRevisar(r) {
 
   let cajaProv;
   if (prov) {
-    cajaProv = `<div class="proveedor-caja"><div class="medio">${f.sugerido ? '<div class="sugerido">✓ Proveedor sugerido</div>' : '<div class="tenue peque">Proveedor</div>'}
+    const etiqueta = f.sugerido && sug.nuevo ? '<div class="sugerido">✓ Proveedor nuevo, añadido automáticamente</div>'
+      : f.sugerido ? '<div class="sugerido">✓ Proveedor reconocido</div>' : '<div class="tenue peque">Proveedor</div>';
+    cajaProv = `<div class="proveedor-caja"><div class="medio">${etiqueta}
       <div class="nombre">${esc(prov.nombre)}</div><div class="tenue peque">${esc(prov.nif || 'Sin NIF')}</div></div>
-      <button class="chip" data-a="elegirProveedor">Cambiar</button></div>`;
+      <button class="chip" data-a="elegirProveedor">Cambiar</button></div>
+      ${sug.nuevo ? '<button class="enlace" data-a="corregirProveedor">Corregir nombre o NIF</button>' : ''}`;
   } else if (sug.nombre || sug.nif) {
     cajaProv = `<div class="tenue peque">Proveedor nuevo encontrado en la factura</div>
       <div class="proveedor-caja"><div class="medio"><div class="nombre">${esc(sug.nombre || 'Sin nombre')}</div><div class="tenue peque">${esc(sug.nif || 'Sin NIF')}</div></div></div>
@@ -642,6 +652,7 @@ async function guardarForm(estado) {
   delete datos.sugerido;
   delete datos.verRetencion;
   const r = await api('guardarGasto', { gasto: datos }, 'Guardando…');
+  if (r.proveedor) reemplazarProveedor(r.proveedor);
   reemplazarGasto(r.gasto);
   delete E.sugerencia[r.gasto.id];
   guardarLS('sugerencias', E.sugerencia);
@@ -713,7 +724,7 @@ function hojaFormProveedor(s) {
     <label class="campo"><span>Nombre</span><input class="entrada" data-h="nombre" value="${esc(s.nombre || '')}"></label>
     <label class="campo"><span>NIF / CIF</span><input class="entrada" data-h="nif" value="${esc(s.nif || '')}" autocapitalize="characters"></label>
     <div class="campo"><span>Categoría habitual</span>${chips}</div>
-    ${s.id ? `<label class="interruptor">Activo<input type="checkbox" data-h="activo" ${s.activo !== false ? 'checked' : ''}></label>` : ''}
+    ${s.id && esDueno() ? `<label class="interruptor">Activo<input type="checkbox" data-h="activo" ${s.activo !== false ? 'checked' : ''}></label>` : ''}
     <div class="dos"><button class="boton secundario" data-a="${s.volverSelector ? 'volverSelector' : 'cerrarHoja'}">Cancelar</button><button class="boton" data-a="guardarProveedor">Guardar</button></div>`;
 }
 
@@ -1107,6 +1118,7 @@ const ACCIONES = {
   verRetencion: () => { E.form.verRetencion = true; pintar(); },
   elegirProveedor: () => abrirHoja(hojaSelectorProveedor, { q: '' }),
   usarProveedor: el => usarProveedorEnForm(proveedor(el.dataset.id)),
+  corregirProveedor: () => abrirHoja(hojaFormProveedor, Object.assign({}, proveedor(E.form.proveedor_id), { paraForm: true })),
   sinProveedor: () => usarProveedorEnForm(null),
   crearSugerido: () => {
     const s = E.sugerencia[E.form.id] || {};
