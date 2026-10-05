@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gastos · La Flor</title>
+  <meta name="theme-color" content="#FBF7F2">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Gastos">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="app" aria-live="polite"></main>
+  <nav id="nav" hidden></nav>
+  <div id="cargando" hidden><div class="caja-cargando"><div class="flor-gira"></div><p id="cargando-texto">Cargando…</p></div></div>
+  <div id="aviso" role="status" hidden></div>
+  <script src="config.js"></script>
+  <script>if (/[?&]demo\b/.test(location.search)) document.write('<script src="demo.js"><\/script>');</script>
+  <script src="app.js"></script>
+</body>
+</html>
