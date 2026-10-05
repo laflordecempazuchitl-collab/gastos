@@ -7,7 +7,7 @@ window.DEMO = (function () {
   };
   const categorias = [
     ['Carnes', 'proveedores'], ['Verduras', 'proveedores'], ['Tortillas', 'proveedores'], ['Insumos mexicanos', 'proveedores'],
-    ['Lácteos', 'proveedores'], ['Productos de aseo', 'proveedores'], ['Alquiler', 'fijos'], ['Suministros', 'fijos'],
+    ['Lácteos', 'proveedores'], ['Bebidas', 'proveedores'],['Productos de aseo', 'proveedores'], ['Alquiler', 'fijos'], ['Suministros', 'fijos'],
     ['Reparaciones', 'varios'], ['Gestoría', 'varios'], ['Menaje', 'varios'], ['Otros', 'varios']
   ].map(([nombre, grupo]) => ({ nombre, grupo }));
   const proveedores = [
