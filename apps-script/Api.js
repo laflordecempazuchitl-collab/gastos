@@ -36,6 +36,7 @@ function despachar_(p) {
     case 'descartar': return descartar_(u, p);
     case 'anular': return anular_(u, p);
     case 'guardarProveedor': return guardarProveedor_(u, p);
+    case 'guardarCategoria': return guardarCategoria_(u, p);
     case 'guardarRecurrente': return guardarRecurrente_(u, p);
     case 'guardarUsuario': return guardarUsuario_(u, p);
   }
@@ -50,7 +51,7 @@ function datos_(u) {
   const r = {
     version: VERSION,
     usuario: u,
-    categorias: CATEGORIAS,
+    categorias: categorias_(),
     gastos,
     proveedores: leer_('Proveedores').map(limpiarProveedor_)
   };

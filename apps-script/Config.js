@@ -6,6 +6,9 @@ const NIF_PROPIO = 'Z1020236F';
 const DIAS_SESION = 90;
 
 // Grupos: proveedores (compras), fijos y varios.
+const GRUPOS = ['proveedores', 'fijos', 'varios'];
+
+// Categorías iniciales. Se copian a la hoja "Categorias" la primera vez; después se crean desde la app.
 const CATEGORIAS = [
   { nombre: 'Carnes', grupo: 'proveedores' },
   { nombre: 'Verduras', grupo: 'proveedores' },
@@ -46,7 +49,8 @@ const HOJAS = {
   Recurrentes: ['id', 'concepto', 'proveedor_id', 'categoria', 'base', 'iva_pct', 'retencion',
     'importe', 'dia_del_mes', 'activo', 'ultimo_mes'],
   Usuarios: ['id', 'nombre', 'rol', 'activo', 'pin_hash', 'sal', 'creado_en'],
-  Sesiones: ['token_hash', 'usuario_id', 'caduca', 'creado_en']
+  Sesiones: ['token_hash', 'usuario_id', 'caduca', 'creado_en'],
+  Categorias: ['nombre', 'grupo', 'activo', 'creado_en']
 };
 
 // Columnas que deben guardarse como texto (para que Sheets no las convierta en números).

@@ -559,6 +559,7 @@ function pintarRevisar(r) {
 
   const chipsCat = Object.keys(GRUPOS).map(gr => `<div class="grupo-chips g-${gr}"><div class="tenue">${GRUPOS[gr]}</div><div class="chips envuelve">
     ${categorias().filter(c => c.grupo === gr).map(c => `<button class="chip ${f.categoria === c.nombre ? 'activo' : ''}" data-a="categoria" data-v="${esc(c.nombre)}">${esc(c.nombre)}</button>`).join('')}
+    <button class="chip chip-nueva" data-a="nuevaCategoria" data-grupo="${gr}">＋ Nueva</button>
   </div></div>`).join('');
 
   const chipsIva = TIPOS_IVA.map(t => `<button class="chip ${f.iva_pct === t ? 'activo' : ''}" data-a="ivaPct" data-v="${t}">${t} %</button>`).join('') +
@@ -725,6 +726,7 @@ function listaSelector(q) {
 function hojaFormProveedor(s) {
   const chips = Object.keys(GRUPOS).map(gr => `<div class="grupo-chips g-${gr}"><div class="tenue">${GRUPOS[gr]}</div><div class="chips envuelve">
     ${categorias().filter(c => c.grupo === gr).map(c => `<button class="chip ${s.categoria_habitual === c.nombre ? 'activo' : ''}" data-a="hojaCategoria" data-v="${esc(c.nombre)}">${esc(c.nombre)}</button>`).join('')}
+    <button class="chip chip-nueva" data-a="nuevaCategoriaProveedor" data-grupo="${gr}">＋ Nueva</button>
   </div></div>`).join('');
   return `<h2>${s.id ? 'Editar proveedor' : 'Nuevo proveedor'}</h2>
     <label class="campo"><span>Nombre</span><input class="entrada" data-h="nombre" value="${esc(s.nombre || '')}"></label>
@@ -732,6 +734,22 @@ function hojaFormProveedor(s) {
     <div class="campo"><span>Categoría habitual</span>${chips}</div>
     ${s.id && esDueno() ? `<label class="interruptor">Activo<input type="checkbox" data-h="activo" ${s.activo !== false ? 'checked' : ''}></label>` : ''}
     <div class="dos"><button class="boton secundario" data-a="${s.volverSelector ? 'volverSelector' : 'cerrarHoja'}">Cancelar</button><button class="boton" data-a="guardarProveedor">Guardar</button></div>`;
+}
+
+// Hoja para crear una categoría. "volver" es la hoja que estaba abierta (p. ej. el alta de proveedor).
+function hojaNuevaCategoria(s) {
+  return `<h2>Nueva categoría</h2>
+    <label class="campo"><span>Nombre</span><input class="entrada" data-h="nombre" value="${esc(s.nombre || '')}" placeholder="Ej.: Bebidas, Pan, Hielo…" maxlength="30"></label>
+    <div class="campo"><span>¿En qué grupo va?</span><div class="chips envuelve">
+      ${Object.keys(GRUPOS).map(gr => `<button class="chip g-${gr} ${s.grupo === gr ? 'activo' : ''}" data-a="grupoCategoria" data-v="${gr}">${GRUPOS[gr]}</button>`).join('')}
+    </div>
+    <p class="tenue peque" style="margin:8px 0 0">Proveedores: compras de género. Gastos fijos: alquiler, luz, agua… Varios: todo lo demás.</p></div>
+    <div class="dos"><button class="boton secundario" data-a="cancelarCategoria">Cancelar</button><button class="boton" data-a="guardarCategoria">Crear</button></div>`;
+}
+
+function abrirNuevaCategoria(grupo, volver) {
+  abrirHoja(hojaNuevaCategoria, { grupo, volver });
+  setTimeout(() => { const i = $('#hoja [data-h="nombre"]'); if (i) i.focus(); }, 50);
 }
 
 function usarProveedorEnForm(p) {
@@ -1136,6 +1154,29 @@ const ACCIONES = {
   },
   volverSelector: () => abrirHoja(hojaSelectorProveedor, { q: '' }),
   hojaCategoria: el => { H.estado.categoria_habitual = el.dataset.v; repintarHoja(); },
+  nuevaCategoria: el => abrirNuevaCategoria(el.dataset.grupo, null),
+  nuevaCategoriaProveedor: el => abrirNuevaCategoria(el.dataset.grupo, { pintar: H.pintar, estado: H.estado }),
+  grupoCategoria: el => { H.estado.grupo = el.dataset.v; repintarHoja(); },
+  cancelarCategoria: () => {
+    const v = H.estado.volver;
+    if (v) abrirHoja(v.pintar, v.estado); else cerrarHoja();
+  },
+  guardarCategoria: async () => {
+    const s = H.estado;
+    if (!String(s.nombre || '').trim()) throw new Error('Escribe el nombre de la categoría.');
+    const r = await api('guardarCategoria', { nombre: s.nombre, grupo: s.grupo }, 'Creando categoría…');
+    const c = r.categoria;
+    if (!categorias().some(x => x.nombre === c.nombre)) E.datos.categorias.push(c);
+    guardarDatos();
+    avisar(r.yaExistia ? `La categoría «${c.nombre}» ya existía` : `Categoría «${c.nombre}» creada`, 'ok');
+    if (s.volver) {
+      abrirHoja(s.volver.pintar, Object.assign(s.volver.estado, { categoria_habitual: c.nombre }));
+    } else {
+      cerrarHoja();
+      if (E.form) E.form.categoria = c.nombre;
+      pintar();
+    }
+  },
   guardarProveedor: async () => {
     const s = H.estado;
     const r = await api('guardarProveedor', { proveedor: { id: s.id, nombre: s.nombre, nif: s.nif, categoria_habitual: s.categoria_habitual, activo: s.activo } }, 'Guardando proveedor…');

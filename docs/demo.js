@@ -66,6 +66,11 @@ window.DEMO = (function () {
         if (!d.id) { d.id = 'p' + (++n); proveedores.push(d); } else Object.assign(proveedores.find(x => x.id === d.id), d);
         return { ok: true, proveedor: d };
       }
+      case 'guardarCategoria': {
+        const c = { nombre: p.nombre.trim()[0].toUpperCase() + p.nombre.trim().slice(1), grupo: p.grupo || 'varios' };
+        categorias.push(c);
+        return { ok: true, categoria: c };
+      }
       case 'guardarRecurrente': return { ok: true, recurrente: Object.assign({ id: 'r' + (++n) }, p.recurrente) };
       case 'guardarUsuario': return { ok: true, usuario: Object.assign({ id: 'u' + (++n) }, p.usuario, { pin: undefined }) };
       case 'descartar': case 'anular': {

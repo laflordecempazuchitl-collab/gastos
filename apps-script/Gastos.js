@@ -14,8 +14,40 @@ function limpiarProveedor_(p) {
   return { id: p.id, nombre: p.nombre, nif: p.nif, categoria_habitual: p.categoria_habitual, activo: esVerdad_(p.activo) };
 }
 
+// Lista de categorías de la hoja "Categorias". Si la hoja no existe, la crea con las iniciales.
+function categorias_() {
+  const libro = libro_();
+  let hoja = libro.getSheetByName('Categorias');
+  if (!hoja) {
+    hoja = libro.insertSheet('Categorias');
+    hoja.getRange(1, 1, 1, HOJAS.Categorias.length).setValues([HOJAS.Categorias]).setFontWeight('bold').setBackground('#FBF7F2');
+    hoja.setFrozenRows(1);
+  }
+  if (hoja.getLastRow() < 2) {
+    const ahora = new Date();
+    hoja.getRange(2, 1, CATEGORIAS.length, 4).setValues(CATEGORIAS.map(c => [c.nombre, c.grupo, true, ahora]));
+  }
+  return leer_('Categorias')
+    .filter(c => esVerdad_(c.activo))
+    .map(c => ({ nombre: String(c.nombre), grupo: GRUPOS.includes(c.grupo) ? c.grupo : 'varios' }));
+}
+
 function categoriaValida_(c) {
-  return CATEGORIAS.some(x => x.nombre === c);
+  return categorias_().some(x => x.nombre === c);
+}
+
+function guardarCategoria_(u, p) {
+  let nombre = String(p.nombre || '').trim().replace(/\s+/g, ' ');
+  if (!nombre) throw new Error('Escribe el nombre de la categoría.');
+  if (nombre.length > 30) throw new Error('El nombre es demasiado largo (máximo 30 letras).');
+  nombre = nombre[0].toUpperCase() + nombre.slice(1);
+  const grupo = GRUPOS.includes(p.grupo) ? p.grupo : 'varios';
+  return conBloqueo_(() => {
+    const existente = categorias_().find(c => normTexto_(c.nombre) === normTexto_(nombre));
+    if (existente) return { categoria: existente, yaExistia: true };
+    insertar_('Categorias', { nombre, grupo, activo: true, creado_en: new Date() });
+    return { categoria: { nombre, grupo } };
+  });
 }
 
 // Carpeta Facturas/AAAA/AAAA-MM

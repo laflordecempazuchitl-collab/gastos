@@ -101,6 +101,7 @@ a { color: var(--ambar); }
 .chip { border: 1.5px solid var(--linea); background: var(--papel); border-radius: 999px; padding: 8px 14px; font-weight: 600; font-size: 14px; white-space: nowrap; cursor: pointer; }
 .chip.activo { background: var(--c, var(--ambar)); border-color: var(--c, var(--ambar)); color: #fff; }
 .grupo-chips { margin-bottom: 8px; }
+.chip.chip-nueva { border-style: dashed; color: var(--c, var(--ambar)); background: transparent; }
 .grupo-chips .tenue { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin: 4px 0 6px; }
 
 .campo { display: block; margin-bottom: 14px; }
