@@ -39,6 +39,9 @@ function despachar_(p) {
     case 'guardarCategoria': return guardarCategoria_(u, p);
     case 'enviarGestoria': return enviarGestoria_(u, p);
     case 'cambiarPin': return cambiarPin_(u, p);
+    case 'subirCierre': return subirCierre_(u, p);
+    case 'guardarCierre': return guardarCierre_(u, p);
+    case 'borrarCierre': return borrarCierre_(u, p);
     case 'guardarRecurrente': return guardarRecurrente_(u, p);
     case 'guardarUsuario': return guardarUsuario_(u, p);
   }
@@ -55,7 +58,8 @@ function datos_(u) {
     usuario: u,
     categorias: categorias_(),
     gastos,
-    proveedores: leer_('Proveedores').map(limpiarProveedor_)
+    proveedores: leer_('Proveedores').map(limpiarProveedor_),
+    cierres: cierresVisibles_(u)
   };
   if (dueno) {
     r.recurrentes = leer_('Recurrentes').map(x => { delete x._fila; x.activo = esVerdad_(x.activo); return x; });

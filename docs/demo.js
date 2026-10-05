@@ -35,8 +35,15 @@ window.DEMO = (function () {
     g(f(-1, 12), 'p3', 'Tortillas', 310, 4), g(f(-1, 20), 'p4', 'Suministros', 402, 21), g(f(-1, 22), '', 'Gestoría', 150, 21, { retencion: 22.5, total: 159 })
   ];
   const usuario = { id: 'u1', nombre: 'Dueño (demo)', rol: 'dueno', activo: true };
+  const cierres = [];
+  for (let i = 1; i <= 34; i++) {
+    const fecha = f(0, hoy.getDate() - i);
+    if (i % 9 === 4) continue; // algún día sin cierre
+    const efectivo = 250 + (i * 37) % 300, tarjeta = 700 + (i * 53) % 600;
+    cierres.push({ id: 'c' + i, fecha, efectivo, tarjeta, total: efectivo + tarjeta, nota: '', archivo_url: '', archivo_id: i % 2 ? 'x' : '', creado_por: 'u1' });
+  }
   const datos = () => ({
-    version: 'demo', usuario, categorias, gastos: gastos.map(x => Object.assign({}, x)), proveedores: proveedores.map(x => Object.assign({}, x)),
+    version: 'demo', usuario, categorias, cierres: cierres.map(x => Object.assign({}, x)), gastos: gastos.map(x => Object.assign({}, x)), proveedores: proveedores.map(x => Object.assign({}, x)),
     recurrentes: [{ id: 'r1', concepto: 'Alquiler del local', proveedor_id: '', categoria: 'Alquiler', base: 1500, iva_pct: 21, retencion: 285, importe: 1530, dia_del_mes: 1, activo: true }],
     usuarios: [usuario, { id: 'u2', nombre: 'Lupita', rol: 'empleado', activo: true }]
   });
@@ -70,6 +77,22 @@ window.DEMO = (function () {
         const c = { nombre: p.nombre.trim()[0].toUpperCase() + p.nombre.trim().slice(1), grupo: p.grupo || 'varios' };
         categorias.push(c);
         return { ok: true, categoria: c };
+      }
+      case 'subirCierre':
+        return { ok: true, archivo_id: 'f' + (++n), archivo_url: '#', leido: true, lectura: { efectivo: 412.3, tarjeta: 1287.5 } };
+      case 'guardarCierre': {
+        const d = p.cierre;
+        if (cierres.some(c => c.fecha === d.fecha && c.id !== d.id)) throw new Error('Ya hay un cierre apuntado para ese día.');
+        let c = cierres.find(x => x.id === d.id);
+        if (!c) { c = { id: 'c' + (++n), creado_por: 'u1' }; cierres.push(c); }
+        Object.assign(c, d, { efectivo: +d.efectivo || 0, tarjeta: +d.tarjeta || 0 });
+        c.total = Math.round((c.efectivo + c.tarjeta) * 100) / 100;
+        return { ok: true, cierre: Object.assign({}, c) };
+      }
+      case 'borrarCierre': {
+        const i = cierres.findIndex(x => x.id === p.id);
+        if (i >= 0) cierres.splice(i, 1);
+        return { ok: true };
       }
       case 'enviarGestoria':
         if (!p.permitirEnlace && !/@gmail\.com$/.test(p.email)) return { ok: true, necesitaEnlace: true };

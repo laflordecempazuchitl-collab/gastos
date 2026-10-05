@@ -86,6 +86,7 @@ function grupoDe(cat) {
 }
 const proveedor = id => ((E.datos && E.datos.proveedores) || []).find(p => String(p.id) === String(id));
 const gastos = () => (E.datos && E.datos.gastos) || [];
+const cierres = () => (E.datos && E.datos.cierres) || [];
 
 // ---------- Comunicación con el servidor ----------
 
@@ -201,7 +202,7 @@ function ir(h) {
 }
 window.addEventListener('hashchange', e => {
   const viejo = decodeURIComponent((e.oldURL.split('#')[1] || 'inicio'));
-  if (!/^(revisar|anadir)/.test(viejo)) E.anterior = viejo;
+  if (!/^(revisar|anadir|cierre)/.test(viejo)) E.anterior = viejo;
   cerrarHoja();
   window.scrollTo(0, 0);
   pintar();
@@ -218,7 +219,7 @@ const svg = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 
 function pintarNav() {
   const nav = $('#nav');
-  const conNav = E.token && E.datos && !['revisar', 'anadir'].includes(ruta().p);
+  const conNav = E.token && E.datos && !['revisar', 'anadir', 'cierre'].includes(ruta().p);
   nav.hidden = !conNav;
   $('#app').classList.toggle('sin-nav', !conNav);
   if (!conNav) return;
@@ -246,7 +247,7 @@ function pintar() {
   const soloDueno = ['informes', 'proveedores'];
   if (soloDueno.includes(r.p) && !esDueno()) { location.hash = 'inicio'; return; }
   pintarNav();
-  const pantallas = { inicio: pintarInicio, anadir: pintarAnadir, revisar: pintarRevisar, facturas: pintarFacturas, informes: pintarInformes, proveedores: pintarProveedores };
+  const pantallas = { inicio: pintarInicio, anadir: pintarAnadir, revisar: pintarRevisar, cierre: pintarCierre, facturas: pintarFacturas, informes: pintarInformes, proveedores: pintarProveedores };
   (pantallas[r.p] || pintarInicio)(r);
 }
 
@@ -320,6 +321,17 @@ function mesClave(desfase = 0) {
 }
 const nombreMes = clave => MESES[Number(clave.slice(5, 7)) - 1];
 
+// Acceso al cierre de caja del día (o aviso de que ya está apuntado).
+function avisoCierre() {
+  const f = fechaCierrePorDefecto();
+  const c = cierreDe(f);
+  const cuando = f === hoyISO() ? 'de hoy' : 'de anoche';
+  const estilo = 'style="background:var(--verde-suave);color:var(--verde);border-color:#BFE0DB"';
+  return c
+    ? `<a class="aviso-revisar" href="#cierre/${esc(c.id)}" ${estilo}><span class="burbuja" style="background:var(--verde)">✓</span><span>Cierre ${cuando} apuntado${esDueno() ? ' · ' + eur(c.total) : ''}</span><span style="margin-left:auto">›</span></a>`
+    : `<a class="aviso-revisar" href="#cierre/nuevo" ${estilo}><span class="burbuja" style="background:var(--verde)">€</span><span>Apuntar el cierre de caja ${cuando}</span><span style="margin-left:auto">›</span></a>`;
+}
+
 function filaGasto(g) {
   const grupo = grupoDe(g.categoria);
   const titulo = g.proveedor_nombre || g.nota || g.categoria || 'Sin proveedor';
@@ -350,7 +362,7 @@ function pintarInicio() {
 
   if (!esDueno()) {
     const ultimas = ordenados(gastos()).slice(0, 15);
-    app.innerHTML = cabecera + avisoPendientes +
+    app.innerHTML = cabecera + avisoCierre() + avisoPendientes +
       `<a class="boton" href="#anadir" style="margin-bottom:16px">＋ Añadir factura</a>
       <div class="tarjeta"><h2>Últimas que has subido</h2>${ultimas.length ? `<ul class="lista">${ultimas.map(filaGasto).join('')}</ul>` : '<p class="vacio-estado">Todavía no has subido ninguna.</p>'}</div>`;
     return;
@@ -367,8 +379,17 @@ function pintarInicio() {
     .filter(x => x.n > 0)
     .sort((a, b) => b.total - a.total);
   const sinCat = delMes.filter(g => !g.categoria);
+  const ingresosMes = sumarCaja(cierres().filter(c => c.fecha.startsWith(mes)));
+  const resultadoMes = r2(ingresosMes - total);
+  const tarjetaCaja = `<button class="tarjeta" data-a="verCaja" style="display:block;width:100%;text-align:left;border:0;cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="margin:0">Caja de ${nombreMes(mes)}</h2><span class="peque" style="color:var(--ambar);font-weight:600">Ver resultados ›</span></div>
+      <div class="resumen-iva" style="margin-top:10px">
+        <span>Ingresos (cierres)</span><b>${eur(ingresosMes)}</b>
+        <span>Gastos</span><b>− ${eur(total)}</b>
+        <span style="font-weight:700">Resultado</span><b style="color:${resultadoMes >= 0 ? 'var(--ok)' : 'var(--rojo)'}">${eur(resultadoMes)}</b>
+      </div></button>`;
 
-  app.innerHTML = cabecera + avisoPendientes + `
+  app.innerHTML = cabecera + avisoCierre() + avisoPendientes + `
     <div class="tarjeta ambar">
       <p class="sub" style="margin:0">Total gastado en ${nombreMes(mes)}</p>
       <div class="num-grande">${eur(total)}</div>
@@ -376,6 +397,7 @@ function pintarInicio() {
       <div class="barra-grupos">${total > 0 ? Object.keys(GRUPOS).map(k => `<span style="width:${porGrupo[k] / total * 100}%;background:${k === 'proveedores' ? '#FCD9A8' : k === 'fijos' ? '#7FD1C7' : '#E9C2DF'}"></span>`).join('') : ''}</div>
       <div class="leyenda">${Object.keys(GRUPOS).map(k => `<div><span class="punto" style="background:${k === 'proveedores' ? '#FCD9A8' : k === 'fijos' ? '#7FD1C7' : '#E9C2DF'}"></span>${GRUPOS[k]}<b>${eur(porGrupo[k])}</b></div>`).join('')}</div>
     </div>
+    ${tarjetaCaja}
     ${porCat.length || sinCat.length ? `<div class="rejilla">${porCat.map(x => `
       <a class="cat-tarjeta g-${x.c.grupo}" href="#facturas/${encodeURIComponent(x.c.nombre)}" style="text-decoration:none;color:inherit">
         <div class="nombre">${esc(x.c.nombre)}</div><div class="importe">${eur(x.total)}</div><div class="tenue peque">${x.n} ${x.n === 1 ? 'factura' : 'facturas'}</div>
@@ -393,6 +415,7 @@ function pintarAnadir(r) {
   $('#app').innerHTML = `
     <div class="cabecera"><button class="volver" data-a="atras" aria-label="Volver">‹</button>
       <div style="flex:1"><h1>${adjuntando ? 'Adjuntar recibo' : 'Añadir factura'}</h1></div></div>
+    ${adjuntando ? '' : avisoCierre()}
     <label class="marco-camara" for="in-foto">
       <span class="hoja"></span><span class="esquina e1"></span><span class="esquina e2"></span><span class="esquina e3"></span><span class="esquina e4"></span>
       <span class="centro"><span class="disparador" style="display:block"></span><b>Hacer foto</b><br>
@@ -669,6 +692,121 @@ async function guardarForm(estado) {
   location.hash = E.anterior && E.anterior !== 'revisar' ? E.anterior : 'inicio';
 }
 
+// ---------- Cierre de caja ----------
+
+const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+function fechaLarga(iso) {
+  const [a, m, d] = iso.split('-').map(Number);
+  return DIAS[new Date(a, m - 1, d).getDay()] + ' ' + d + ' de ' + MESES[m - 1];
+}
+const mayuscula = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+function sumarDias(iso, n) {
+  const [a, m, d] = iso.split('-').map(Number);
+  const f = new Date(a, m - 1, d + n);
+  return f.getFullYear() + '-' + pad(f.getMonth() + 1) + '-' + pad(f.getDate());
+}
+// Si se cierra de madrugada, el cierre es del día anterior.
+const fechaCierrePorDefecto = () => new Date().getHours() < 6 ? sumarDias(hoyISO(), -1) : hoyISO();
+const cierreDe = fecha => cierres().find(c => c.fecha === fecha);
+const sumarCaja = (lista, k = 'total') => r2(lista.reduce((s, c) => s + (Number(c[k]) || 0), 0));
+
+function nuevoCierreForm(c) {
+  return {
+    id: c ? c.id : '',
+    fecha: c ? c.fecha : fechaCierrePorDefecto(),
+    efectivo: c ? leerNum(c.efectivo) : '',
+    tarjeta: c ? leerNum(c.tarjeta) : '',
+    nota: c ? c.nota : '',
+    archivo_id: c ? c.archivo_id : '',
+    archivo_url: c ? c.archivo_url : '',
+    ocr_texto: ''
+  };
+}
+
+function pintarCierre(r) {
+  const id = r.a;
+  if (id !== 'nuevo') {
+    const c = cierres().find(x => x.id === id);
+    if (!c) { $('#app').innerHTML = '<div class="vacio-estado"><p>Este cierre ya no existe.</p><a class="boton" href="#inicio">Ir al inicio</a></div>'; return; }
+    if (!E.cierre || E.cierre.id !== id) E.cierre = nuevoCierreForm(c);
+  } else if (!E.cierre || E.cierre.id) {
+    E.cierre = nuevoCierreForm(null);
+  }
+  const f = E.cierre;
+  const previa = E.vistaPrevia['cierre:' + (f.archivo_id || '')];
+  const repetido = !f.id && cierreDe(f.fecha);
+  const total = r2((Number(f.efectivo) || 0) + (Number(f.tarjeta) || 0));
+
+  const foto = previa || f.archivo_url
+    ? `<div class="tarjeta vista-previa">${previa ? `<img src="${previa}" alt="Sobre del cierre">` : '<span class="doc">FOTO</span>'}
+        <div style="flex:1"><b>Foto del cierre</b><br>${f.archivo_url ? `<a href="${esc(f.archivo_url)}" target="_blank" rel="noopener">Ver foto</a> · ` : ''}<label for="in-cierre-galeria" class="enlace" style="padding:0">Cambiar</label></div></div>`
+    : `<label class="tarjeta" for="in-cierre-foto" style="display:flex;align-items:center;gap:14px;cursor:pointer;border:2px dashed var(--linea);box-shadow:none">
+        <span class="disparador" style="width:52px;height:52px;margin:0;border-width:4px;flex:none"></span>
+        <span style="flex:1"><b>Hacer foto del sobre</b><br><span class="tenue peque">Se guarda como comprobante. Si lleva el ticket impreso, se leen los importes.</span></span></label>
+      <label for="in-cierre-galeria" class="enlace" style="display:block;margin:-6px 0 12px">o elegir de la galería</label>`;
+
+  $('#app').innerHTML = `
+    <div class="cabecera"><button class="volver" data-a="atrasCierre" aria-label="Volver">‹</button>
+      <div style="flex:1"><p class="sub">${esc(mayuscula(fechaLarga(f.fecha)))}</p><h1>Cierre de caja</h1></div></div>
+    ${foto}
+    <input type="file" id="in-cierre-foto" accept="image/*" capture="environment" data-cierre="1" hidden>
+    <input type="file" id="in-cierre-galeria" accept="image/*,application/pdf" data-cierre="1" hidden>
+    <div class="tarjeta">
+      <label class="campo"><span>Día del cierre</span><input class="entrada" type="date" data-cc="fecha" value="${esc(f.fecha)}" max="${hoyISO()}"></label>
+      ${repetido ? `<div class="descuadre">Ya hay un cierre del ${esc(fechaLarga(f.fecha))}. <a href="#cierre/${esc(repetido.id)}">Abrirlo para corregirlo</a></div>` : ''}
+      <div class="dos">
+        <label class="campo"><span>💶 Efectivo</span><input class="entrada importe" inputmode="decimal" data-cc="efectivo" value="${numCampo(f.efectivo)}" placeholder="0,00"></label>
+        <label class="campo"><span>💳 Datáfono</span><input class="entrada importe" inputmode="decimal" data-cc="tarjeta" value="${numCampo(f.tarjeta)}" placeholder="0,00"></label>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--linea);padding-top:12px">
+        <b>Total del día</b><span class="num-grande" style="font-size:30px" id="total-cierre">${eur(total)}</span></div>
+    </div>
+    <div class="tarjeta"><label class="campo" style="margin:0"><span>Nota (opcional)</span><textarea class="entrada" data-cc="nota" placeholder="Ej.: faltan 5 € de cambio">${esc(f.nota)}</textarea></label></div>
+    <div class="botones"><button class="boton secundario" data-a="atrasCierre">Cancelar</button><button class="boton" data-a="guardarCierre" ${repetido ? 'disabled' : ''}>Guardar cierre</button></div>
+    ${f.id && esDueno() ? '<button class="enlace" data-a="borrarCierre" style="display:block;margin:10px auto 0;color:var(--rojo)">Borrar este cierre</button>' : ''}`;
+}
+
+function campoCierre(el) {
+  const f = E.cierre;
+  if (!f) return;
+  const c = el.dataset.cc;
+  if (c === 'efectivo' || c === 'tarjeta') {
+    f[c] = leerNum(el.value);
+    const t = $('#total-cierre');
+    if (t) t.textContent = eur((Number(f.efectivo) || 0) + (Number(f.tarjeta) || 0));
+  } else {
+    f[c] = el.value;
+    if (c === 'fecha' && el.value) pintar();
+  }
+}
+
+async function procesarFotoCierre(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const f = E.cierre;
+  let blob = file, mime = file.type;
+  if (mime === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+    mime = 'application/pdf';
+  } else {
+    cargando('Preparando la foto…');
+    try { blob = await comprimir(file); } finally { cargando(false); }
+    mime = 'image/jpeg';
+  }
+  const r = await api('subirCierre', { archivo: { base64: await aBase64(blob), mime }, fecha: f.fecha }, 'Guardando la foto y leyendo los importes…');
+  f.archivo_id = r.archivo_id;
+  f.archivo_url = r.archivo_url;
+  f.ocr_texto = r.ocr_texto || '';
+  if (mime.startsWith('image/')) E.vistaPrevia['cierre:' + r.archivo_id] = URL.createObjectURL(blob);
+  const l = r.lectura || {};
+  let leidos = 0;
+  if (vacio(f.efectivo) && !vacio(l.efectivo)) { f.efectivo = l.efectivo; leidos++; }
+  if (vacio(f.tarjeta) && !vacio(l.tarjeta)) { f.tarjeta = l.tarjeta; leidos++; }
+  if (!f.id && l.fecha && l.fecha <= hoyISO() && l.fecha >= sumarDias(hoyISO(), -7)) f.fecha = l.fecha;
+  avisar(leidos ? 'He leído los importes del ticket. Compruébalos antes de guardar.' : 'Foto guardada. Escribe el efectivo y el datáfono.', leidos ? 'ok' : '');
+  pintar();
+}
+
 // ---------- Selector y formulario de proveedor (hoja inferior) ----------
 
 const H = { pintar: null, estado: null };
@@ -832,6 +970,17 @@ function pintarInformes() {
   const total = sumar(lista), totalAnt = sumar(gastos().filter(g => enRango(g, ant)));
   const hayFuturo = moverPeriodo(p, 1);
   const futuroBloqueado = rango(hayFuturo).desde > hoyISO();
+  const caja = E.vistaInforme === 'caja';
+  const arriba = `
+    <div class="cabecera"><div><p class="sub">Informes</p><h1>${caja ? '¿Cuánto hemos ganado?' : '¿Cuánto hemos gastado?'}</h1></div></div>
+    <div class="segmentos" style="grid-template-columns:1fr 1fr">
+      <button class="${caja ? '' : 'activo'}" data-a="vistaInforme" data-v="gastos">Gastos</button>
+      <button class="${caja ? 'activo' : ''}" data-a="vistaInforme" data-v="caja">Caja y resultados</button></div>
+    <div class="segmentos">${['mes', 'trimestre', 'año'].map(t => `<button class="${p.tipo === t ? 'activo' : ''}" data-a="tipoPeriodo" data-v="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>
+    <div class="navegador"><button data-a="periodo" data-v="-1" aria-label="Anterior">‹</button>
+      <div style="text-align:center"><b>${esc(r.nombre)}</b>${r.detalle ? `<div class="tenue peque">${r.detalle}</div>` : ''}</div>
+      <button data-a="periodo" data-v="1" aria-label="Siguiente" ${futuroBloqueado ? 'disabled' : ''}>›</button></div>`;
+  if (caja) { $('#app').innerHTML = arriba + informeCaja(p, r, ant, lista); return; }
 
   let comparacion = '';
   if (totalAnt > 0) {
@@ -857,12 +1006,7 @@ function pintarInformes() {
   const pendientes = lista.filter(g => g.estado === 'por_revisar').length;
   const sinBase = lista.filter(g => vacio(g.base) || g.base === 0).length;
 
-  $('#app').innerHTML = `
-    <div class="cabecera"><div><p class="sub">Informes</p><h1>¿Cuánto hemos gastado?</h1></div></div>
-    <div class="segmentos">${['mes', 'trimestre', 'año'].map(t => `<button class="${p.tipo === t ? 'activo' : ''}" data-a="tipoPeriodo" data-v="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>
-    <div class="navegador"><button data-a="periodo" data-v="-1" aria-label="Anterior">‹</button>
-      <div style="text-align:center"><b>${esc(r.nombre)}</b>${r.detalle ? `<div class="tenue peque">${r.detalle}</div>` : ''}</div>
-      <button data-a="periodo" data-v="1" aria-label="Siguiente" ${futuroBloqueado ? 'disabled' : ''}>›</button></div>
+  $('#app').innerHTML = arriba + `
     <div class="tarjeta ambar">
       <p class="sub" style="margin:0">Total del periodo</p>
       <div class="num-grande">${eur(total)}</div>
@@ -895,6 +1039,87 @@ function pintarInformes() {
       <button class="boton secundario" data-a="exportar" data-v="csv" ${lista.length ? '' : 'disabled'}>Descargar CSV</button>
     </div>`;
 }
+
+// Pestaña "Caja y resultados": ingresos de los cierres frente a los gastos del mismo periodo.
+function informeCaja(p, r, ant, gastosPeriodo) {
+  const lista = cierres().filter(c => enRango(c, r));
+  const ingresos = sumarCaja(lista), efectivo = sumarCaja(lista, 'efectivo'), tarjeta = sumarCaja(lista, 'tarjeta');
+  const gastosTot = sumar(gastosPeriodo);
+  const compras = sumar(gastosPeriodo.filter(g => grupoDe(g.categoria) === 'proveedores'));
+  const resultado = r2(ingresos - gastosTot);
+  const resultadoAnt = r2(sumarCaja(cierres().filter(c => enRango(c, ant))) - sumar(gastosLista(ant)));
+  const pct = (a, b) => b > 0 ? Math.round(a / b * 100) : 0;
+
+  // Días sin cierre (del periodo, hasta ayer)
+  // (se cuenta desde el primer cierre apuntado, para no avisar de días anteriores a usar la app)
+  const hasta = r.hasta < hoyISO() ? r.hasta : sumarDias(hoyISO(), -1);
+  const primero = cierres().map(c => c.fecha).sort()[0];
+  const faltan = [];
+  if (primero) {
+    for (let d = r.desde > primero ? r.desde : primero; d <= hasta; d = sumarDias(d, 1)) if (!cierreDe(d)) faltan.push(d);
+  }
+
+  const barra = (texto, valor, total, color) => `<div class="barra-cat"><div class="cab"><span>${texto}</span><b>${pct(valor, total)} %</b></div>
+    <div class="pista"><div class="relleno" style="width:${Math.min(100, pct(valor, total))}%;background:${color}"></div></div></div>`;
+
+  // Detalle: por día en un mes; por mes en trimestre y año.
+  let detalle;
+  if (p.tipo === 'mes') {
+    detalle = lista.length ? `<ul class="lista">${lista.slice().sort((a, b) => b.fecha.localeCompare(a.fecha)).map(c => `<li><a class="fila g-fijos" href="#cierre/${esc(c.id)}" style="text-decoration:none;color:inherit">
+      <span class="icono">${Number(c.fecha.slice(8))}</span>
+      <span class="medio"><span class="titulo" style="display:block">${esc(mayuscula(fechaLarga(c.fecha)))}</span><span class="detalle" style="display:block">💶 ${eur(c.efectivo)} · 💳 ${eur(c.tarjeta)}${c.archivo_id ? '' : ' · sin foto'}</span></span>
+      <span class="derecha importe">${eur(c.total)}</span></a></li>`).join('')}</ul>` : '<p class="vacio-estado">No hay cierres apuntados en este mes.</p>';
+  } else {
+    const meses = [];
+    for (let d = r.desde; d <= r.hasta; d = sumarDias(d.slice(0, 7) + '-28', 7).slice(0, 7) + '-01') meses.push(d.slice(0, 7));
+    detalle = `<div class="resumen-iva" style="grid-template-columns:1fr auto auto auto;gap:8px 12px">
+      <span class="tenue peque">Mes</span><b class="tenue peque">Ingresos</b><b class="tenue peque">Gastos</b><b class="tenue peque">Resultado</b>
+      ${meses.map(m => {
+        const i = sumarCaja(cierres().filter(c => c.fecha.startsWith(m)));
+        const g = sumar(gastos().filter(x => (x.fecha || '').startsWith(m)));
+        return `<span style="text-transform:capitalize">${nombreMes(m)}</span><b>${eur(i)}</b><b>${eur(g)}</b><b style="color:${i - g >= 0 ? 'var(--ok)' : 'var(--rojo)'}">${eur(i - g)}</b>`;
+      }).join('')}</div>`;
+  }
+
+  // Solo se compara con el periodo anterior cuando este ya ha terminado (un mes a medias engañaría).
+  let comparacion = '';
+  if (resultadoAnt !== 0 && r.hasta < hoyISO()) {
+    const dif = r2(resultado - resultadoAnt);
+    comparacion = `${dif >= 0 ? '▲' : '▼'} ${eur(Math.abs(dif))} ${dif >= 0 ? 'más' : 'menos'} que el periodo anterior`;
+  }
+
+  return `
+    <div class="tarjeta" style="background:${resultado >= 0 ? 'var(--verde)' : 'var(--rojo)'};color:#fff">
+      <p style="margin:0;color:rgba(255,255,255,.8)">Resultado del periodo</p>
+      <div class="num-grande">${eur(resultado)}</div>
+      <p class="peque" style="margin:0;color:rgba(255,255,255,.85)">Ingresos ${eur(ingresos)} − Gastos ${eur(gastosTot)}${comparacion ? '<br>' + comparacion : ''}</p>
+    </div>
+    ${faltan.length ? `<p class="descuadre">${faltan.length === 1 ? 'Falta el cierre del ' + fechaCorta(faltan[0]) : `Faltan ${faltan.length} cierres en este periodo`} (si ese día estuvo cerrado, no pasa nada).</p>` : ''}
+    <div class="tarjeta">
+      <h2>Ingresos</h2>
+      <div class="resumen-iva">
+        <span>💶 Efectivo</span><b>${eur(efectivo)}</b>
+        <span>💳 Datáfono</span><b>${eur(tarjeta)}</b>
+        <span style="font-weight:700">Total</span><b>${eur(ingresos)}</b>
+        <span class="tenue">Días con cierre</span><b class="tenue">${lista.length}</b>
+        <span class="tenue">Media por día</span><b class="tenue">${eur(lista.length ? ingresos / lista.length : 0)}</b>
+      </div>
+    </div>
+    <div class="tarjeta">
+      <h2>¿Qué parte de los ingresos se va en…?</h2>
+      ${ingresos > 0 ? barra('Compras de género (proveedores)', compras, ingresos, COLOR_GRUPO.proveedores) +
+        barra('Gastos fijos', sumar(gastosPeriodo.filter(g => grupoDe(g.categoria) === 'fijos')), ingresos, COLOR_GRUPO.fijos) +
+        barra('Varios', sumar(gastosPeriodo.filter(g => grupoDe(g.categoria) === 'varios')), ingresos, COLOR_GRUPO.varios) +
+        barra('Total de gastos', gastosTot, ingresos, '#2A2118')
+        : '<p class="vacio-estado">Apunta los cierres de caja para ver este cálculo.</p>'}
+      <p class="tenue peque" style="margin:8px 0 0">Importes con IVA. Es una aproximación: solo cuenta los gastos apuntados en la app (no incluye nóminas ni seguros sociales si no los apuntas).</p>
+    </div>
+    <div class="tarjeta"><h2>${p.tipo === 'mes' ? 'Cierres del mes' : 'Mes a mes'}</h2>${detalle}</div>
+    <a class="boton borde" href="#cierre/nuevo" style="margin-bottom:10px">＋ Apuntar un cierre</a>
+    <button class="boton secundario" data-a="exportar" data-v="xlsx">Descargar Excel (gastos y caja)</button>`;
+}
+
+const gastosLista = r => gastos().filter(g => enRango(g, r));
 
 function filasExportar(lista) {
   return ordenados(lista).reverse().map(g => ({
@@ -960,15 +1185,15 @@ async function exportar(formato) {
   }
   cargando('Preparando el Excel…');
   try {
-    const datos = await construirExcel(lista);
+    const datos = await construirExcel(lista, cierres().filter(c => enRango(c, r)));
     await entregarArchivo(new Blob([datos], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), nombre + '.xlsx');
   } finally {
     cargando(false);
   }
 }
 
-// Devuelve el Excel (hojas "Gastos" y "Resumen") de una lista de gastos.
-async function construirExcel(lista) {
+// Devuelve el Excel (hojas "Gastos", "Resumen" y, si hay cierres, "Caja").
+async function construirExcel(lista, cierresPeriodo = []) {
   if (!window.XLSX) await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
   const filas = filasExportar(lista);
   {
@@ -991,12 +1216,28 @@ async function construirExcel(lista) {
       const l = lista.filter(g => t === '' ? vacio(g.iva_pct) : Number(g.iva_pct) === t && !vacio(g.iva_pct));
       if (l.length) fila(t === '' ? 'IVA varios tipos' : `IVA ${t} %`, sum(l, 'base'), sum(l, 'iva_importe'), sum(l, 'retencion'), sum(l, 'total'));
     });
+    if (cierresPeriodo.length) {
+      const ingresos = sumarCaja(cierresPeriodo);
+      fila('', '', '', '', '');
+      fila('INGRESOS (cierres de caja)', '', '', '', ingresos);
+      fila('RESULTADO (ingresos − gastos)', '', '', '', r2(ingresos - sum(lista, 'total')));
+    }
     const hojaR = X.utils.json_to_sheet(resumen);
-    formatearHoja(X, hojaR, ['Base', 'IVA', 'Retención', 'Total'], [22, 14, 14, 14, 14]);
+    formatearHoja(X, hojaR, ['Base', 'IVA', 'Retención', 'Total'], [30, 14, 14, 14, 14]);
 
     const libro = X.utils.book_new();
     X.utils.book_append_sheet(libro, hoja, 'Gastos');
     X.utils.book_append_sheet(libro, hojaR, 'Resumen');
+    if (cierresPeriodo.length) {
+      const filasC = cierresPeriodo.slice().sort((a, b) => a.fecha.localeCompare(b.fecha)).map(c => ({
+        'Fecha': new Date(c.fecha + 'T12:00:00'), 'Efectivo': Number(c.efectivo) || 0, 'Datáfono': Number(c.tarjeta) || 0,
+        'Total': Number(c.total) || 0, 'Nota': c.nota || '', 'Foto': c.archivo_url || ''
+      }));
+      filasC.push({ 'Fecha': 'TOTAL', 'Efectivo': sumarCaja(cierresPeriodo, 'efectivo'), 'Datáfono': sumarCaja(cierresPeriodo, 'tarjeta'), 'Total': sumarCaja(cierresPeriodo), 'Nota': '', 'Foto': '' });
+      const hojaC = X.utils.json_to_sheet(filasC, { cellDates: true, dateNF: 'dd/mm/yyyy' });
+      formatearHoja(X, hojaC, ['Efectivo', 'Datáfono', 'Total'], [12, 12, 12, 12, 30, 40]);
+      X.utils.book_append_sheet(libro, hojaC, 'Caja');
+    }
     return X.write(libro, { bookType: 'xlsx', type: 'array', cellDates: true });
   }
 }
@@ -1026,7 +1267,7 @@ async function enviarGestoria(permitirEnlace) {
   cargando('Preparando el informe…');
   let excel;
   try {
-    excel = { base64: await aBase64(new Blob([await construirExcel(lista)])), nombre: 'Gastos La Flor - ' + r.nombre + '.xlsx' };
+    excel = { base64: await aBase64(new Blob([await construirExcel(lista, cierres().filter(c => enRango(c, r)))])), nombre: 'Gastos La Flor - ' + r.nombre + '.xlsx' };
   } finally {
     cargando(false);
   }
@@ -1277,6 +1518,37 @@ const ACCIONES = {
     location.hash = E.anterior || 'inicio';
   },
 
+  // Cierre de caja
+  atrasCierre: () => {
+    E.cierre = null;
+    if (history.length > 1) history.back(); else ir('inicio');
+  },
+  guardarCierre: async () => {
+    const f = E.cierre;
+    if (vacio(f.efectivo) && vacio(f.tarjeta)) throw new Error('Escribe el efectivo y el datáfono.');
+    const r = await api('guardarCierre', { cierre: f }, 'Guardando el cierre…');
+    const lista = E.datos.cierres = cierres();
+    const i = lista.findIndex(c => c.id === r.cierre.id);
+    if (i >= 0) lista[i] = r.cierre; else lista.push(r.cierre);
+    if (f.archivo_id && E.vistaPrevia['cierre:' + f.archivo_id]) E.vistaPrevia['cierre:' + r.cierre.archivo_id] = E.vistaPrevia['cierre:' + f.archivo_id];
+    guardarDatos();
+    E.cierre = null;
+    avisar(`Cierre del ${fechaCorta(r.cierre.fecha)} guardado ✓ · ${eur(r.cierre.total)}`, 'ok');
+    location.hash = E.anterior || 'inicio';
+  },
+  borrarCierre: async () => {
+    if (!(await confirmar('¿Borrar este cierre de caja? La foto irá a la papelera de Drive.', 'Borrar', true))) return;
+    const id = E.cierre.id;
+    await api('borrarCierre', { id }, 'Borrando…');
+    E.datos.cierres = cierres().filter(c => c.id !== id);
+    guardarDatos();
+    E.cierre = null;
+    avisar('Cierre borrado', 'ok');
+    location.hash = E.anterior || 'inicio';
+  },
+  vistaInforme: el => { E.vistaInforme = el.dataset.v; pintar(); },
+  verCaja: () => { E.vistaInforme = 'caja'; E.periodo = periodoActual(); ir('informes'); },
+
   // Facturas
   filtro: el => {
     E.filtro = el.dataset.v;
@@ -1358,6 +1630,7 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.campo) campoForm(t);
+  else if (t.dataset.cc) campoCierre(t);
   else if (t.dataset.h) {
     H.estado[t.dataset.h] = t.type === 'checkbox' ? t.checked : t.value;
     if (t.dataset.h === 'q') { const l = $('#hoja-lista'); if (l) l.innerHTML = listaSelector(t.value); }
@@ -1367,7 +1640,9 @@ document.addEventListener('input', e => {
 
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.type === 'file') procesarArchivo(t).catch(err => { cargando(false); avisar(err.message, 'error'); });
+  if (t.type === 'file') {
+    (t.dataset.cierre ? procesarFotoCierre(t) : procesarArchivo(t)).catch(err => { cargando(false); avisar(err.message, 'error'); });
+  }
   else if (t.dataset.h && t.tagName === 'SELECT') H.estado[t.dataset.h] = t.value;
   else if (t.dataset.h && t.type === 'checkbox') H.estado[t.dataset.h] = t.checked;
 });

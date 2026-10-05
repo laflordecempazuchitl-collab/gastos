@@ -5,7 +5,24 @@ function libro_() {
 }
 
 function hoja_(nombre) {
-  return libro_().getSheetByName(nombre);
+  return libro_().getSheetByName(nombre) || crearHoja_(nombre);
+}
+
+// Crea una pestaña nueva (de las añadidas después de "configurar") con su cabecera y formatos.
+function crearHoja_(nombre) {
+  const columnas = HOJAS[nombre];
+  if (!columnas) return null;
+  const hoja = libro_().insertSheet(nombre);
+  hoja.getRange(1, 1, 1, columnas.length).setValues([columnas]).setFontWeight('bold').setBackground('#FBF7F2');
+  hoja.setFrozenRows(1);
+  columnas.forEach((col, i) => {
+    const rango = hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1);
+    if (COLUMNAS_TEXTO.includes(col)) rango.setNumberFormat('@');
+    else if (COLUMNAS_EUROS.includes(col)) rango.setNumberFormat('#,##0.00 €');
+    else if (col === 'fecha') rango.setNumberFormat('dd/mm/yyyy');
+    else if (col === 'creado_en' || col === 'modificado_en') rango.setNumberFormat('dd/mm/yyyy hh:mm');
+  });
+  return hoja;
 }
 
 function leer_(nombre) {
