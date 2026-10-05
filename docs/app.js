@@ -143,9 +143,15 @@ function refrescar(mostrarCarga) {
         E.datos = d;
         E.ultimaCarga = Date.now();
         guardarLS('datos', d);
-        // No se repinta mientras se edita un gasto o hay una hoja abierta, para no perder lo escrito.
-        if (primeraVez || (ruta().p !== 'revisar' && !$('#hoja'))) pintar();
-        else pintarNav();
+        // Lo escrito se guarda en E.form al teclear, así que se puede repintar sin perderlo;
+        // solo se espera si el cursor está en un campo, para no quitarle el foco.
+        const escribiendo = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '');
+        if (primeraVez || !escribiendo) {
+          pintar();
+          if ($('#hoja') && H.pintar) repintarHoja();
+        } else {
+          pintarNav();
+        }
       })
       .finally(() => { cargaEnCurso = null; });
   }
