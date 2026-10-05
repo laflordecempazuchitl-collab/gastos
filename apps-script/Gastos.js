@@ -61,12 +61,21 @@ function carpetaMes_(fechaIso) {
   return sub(sub(raiz, anio), mes);
 }
 
-function guardarArchivo_(a, nombreBase) {
+function guardarArchivo_(a, nombreBase, fechaIso) {
   const ext = TIPOS_ARCHIVO[a && a.mime];
   if (!ext) throw new Error('Tipo de archivo no admitido. Usa una foto o un PDF.');
   if (!a.base64 || a.base64.length > 20 * 1024 * 1024) throw new Error('El archivo es demasiado grande (máximo 15 MB).');
   const blob = Utilities.newBlob(Utilities.base64Decode(a.base64), a.mime, nombreBase + '.' + ext);
-  return carpetaMes_(hoyISO_()).createFile(blob);
+  return carpetaMes_(fechaIso || hoyISO_()).createFile(blob);
+}
+
+// Cada archivo vive en la carpeta del mes de su factura (así se puede compartir el mes con la gestoría).
+function moverAlMes_(archivoId, fechaIso) {
+  try {
+    DriveApp.getFileById(archivoId).moveTo(carpetaMes_(fechaIso));
+  } catch (e) {
+    console.error(e);
+  }
 }
 
 function leerArchivo_(archivo) {
@@ -128,6 +137,7 @@ function subir_(u, p) {
     modificado_en: ahora,
     ocr_texto: texto.slice(0, 45000)
   };
+  if (gasto.fecha.slice(0, 7) !== hoyISO_().slice(0, 7)) moverAlMes_(gasto.archivo_id, gasto.fecha);
   conBloqueo_(() => insertar_('Gastos', gasto));
   return {
     gasto: limpiarGasto_(gasto),
@@ -148,7 +158,7 @@ function gastoPermitido_(u, id) {
 // Adjunta un archivo a un gasto que no lo tenía (por ejemplo, el recibo del alquiler).
 function adjuntar_(u, p) {
   const g = gastoPermitido_(u, p.id);
-  const archivo = guardarArchivo_(p.archivo, hoyISO_() + ' ' + g.id);
+  const archivo = guardarArchivo_(p.archivo, hoyISO_() + ' ' + g.id, g.fecha);
   const texto = leerArchivo_(archivo);
   const d = analizarFactura_(texto, []);
   const cambios = { archivo_url: archivo.getUrl(), archivo_id: archivo.getId(), modificado_en: new Date(), ocr_texto: texto.slice(0, 45000) };
@@ -225,9 +235,19 @@ function descartar_(u, p) {
 }
 
 // Anular no borra nada: el gasto deja de contar pero sigue en la hoja.
+// Su archivo pasa a la carpeta "Anuladas" para que no se comparta con la gestoría.
 function anular_(u, p) {
   soloDueno_(u);
-  conBloqueo_(() => actualizar_('Gastos', p.id, { estado: 'anulado', modificado_en: new Date() }));
+  const g = conBloqueo_(() => actualizar_('Gastos', p.id, { estado: 'anulado', modificado_en: new Date() }));
+  if (g.archivo_id) {
+    try {
+      const raiz = DriveApp.getFolderById(prop_('CARPETA_ID'));
+      const it = raiz.getFoldersByName('Anuladas');
+      DriveApp.getFileById(g.archivo_id).moveTo(it.hasNext() ? it.next() : raiz.createFolder('Anuladas'));
+    } catch (e) {
+      console.error(e);
+    }
+  }
   return {};
 }
 

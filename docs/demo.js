@@ -71,6 +71,12 @@ window.DEMO = (function () {
         categorias.push(c);
         return { ok: true, categoria: c };
       }
+      case 'enviarGestoria':
+        if (!p.permitirEnlace && !/@gmail\.com$/.test(p.email)) return { ok: true, necesitaEnlace: true };
+        return { ok: true, enviado: true };
+      case 'cambiarPin':
+        if (p.actual !== '1234') throw new Error('El PIN actual no es correcto.');
+        return { ok: true };
       case 'guardarRecurrente': return { ok: true, recurrente: Object.assign({ id: 'r' + (++n) }, p.recurrente) };
       case 'guardarUsuario': return { ok: true, usuario: Object.assign({ id: 'u' + (++n) }, p.usuario, { pin: undefined }) };
       case 'descartar': case 'anular': {

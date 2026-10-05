@@ -94,6 +94,24 @@ function logout_(token) {
   return {};
 }
 
+// Cada persona cambia su propio PIN (hace falta el actual). Se cierran sus otras sesiones.
+function cambiarPin_(u, p) {
+  validarPin_(p.nuevo);
+  return conBloqueo_(() => {
+    const yo = leer_('Usuarios').find(x => String(x.id) === String(u.id));
+    if (!yo || hash_(yo.sal + ':' + p.actual) !== yo.pin_hash) throw new Error('El PIN actual no es correcto.');
+    const sal = nuevoId_();
+    actualizar_('Usuarios', u.id, { sal, pin_hash: hash_(sal + ':' + p.nuevo) });
+    const actual = hash_(p.token);
+    const hoja = hoja_('Sesiones');
+    leer_('Sesiones')
+      .filter(s => String(s.usuario_id) === String(u.id) && s.token_hash !== actual)
+      .map(s => s._fila).sort((a, b) => b - a)
+      .forEach(f => hoja.deleteRow(f));
+    return {};
+  });
+}
+
 function soloDueno_(u) {
   if (u.rol !== 'dueno') throw new Error('Solo el dueño puede hacer esto.');
 }

@@ -37,6 +37,8 @@ function despachar_(p) {
     case 'anular': return anular_(u, p);
     case 'guardarProveedor': return guardarProveedor_(u, p);
     case 'guardarCategoria': return guardarCategoria_(u, p);
+    case 'enviarGestoria': return enviarGestoria_(u, p);
+    case 'cambiarPin': return cambiarPin_(u, p);
     case 'guardarRecurrente': return guardarRecurrente_(u, p);
     case 'guardarUsuario': return guardarUsuario_(u, p);
   }
@@ -58,6 +60,7 @@ function datos_(u) {
   if (dueno) {
     r.recurrentes = leer_('Recurrentes').map(x => { delete x._fila; x.activo = esVerdad_(x.activo); return x; });
     r.usuarios = leer_('Usuarios').map(usuarioPublico_);
+    r.gestoria_email = prop_('GESTORIA_EMAIL') || '';
   }
   return r;
 }

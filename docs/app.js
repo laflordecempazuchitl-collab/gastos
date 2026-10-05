@@ -346,7 +346,7 @@ function pintarInicio() {
     ? `<a class="aviso-revisar" href="#facturas/por_revisar"><span class="burbuja">${pendientes.length}</span><span>${pendientes.length === 1 ? 'Factura por revisar' : 'Facturas por revisar'}</span><span style="margin-left:auto">›</span></a>`
     : '';
   const cabecera = `<div class="cabecera"><div><p class="sub">Hola, ${esc(u.nombre)}</p><h1>${esDueno() ? 'Gastos de ' + nombreMes(mesClave()) : 'Tus facturas'}</h1></div>
-    <button class="enlace" data-a="salir">Salir</button></div>`;
+    <div style="display:flex;gap:14px"><button class="enlace" data-a="cambiarPin">Mi PIN</button><button class="enlace" data-a="salir">Salir</button></div></div>`;
 
   if (!esDueno()) {
     const ultimas = ordenados(gastos()).slice(0, 15);
@@ -889,8 +889,11 @@ function pintarInformes() {
       ${pendientes ? `<p class="descuadre" style="margin:12px 0 0">Hay ${pendientes} ${pendientes === 1 ? 'gasto' : 'gastos'} por revisar en este periodo. <a href="#facturas/por_revisar">Revisar</a></p>` : ''}
       ${sinBase ? `<p class="tenue peque" style="margin:10px 0 0">${sinBase} ${sinBase === 1 ? 'gasto no tiene' : 'gastos no tienen'} base/IVA separados.</p>` : ''}
     </div>
-    <button class="boton verde" data-a="exportar" data-v="xlsx" ${lista.length ? '' : 'disabled'}>Exportar para la gestoría (Excel)</button>
-    <button class="enlace" data-a="exportar" data-v="csv" style="display:block;margin:8px auto 0" ${lista.length ? '' : 'disabled'}>Descargar CSV (copia de seguridad)</button>`;
+    <button class="boton verde" data-a="abrirGestoria" ${lista.length ? '' : 'disabled'}>✉️ Enviar a la gestoría</button>
+    <div class="dos" style="margin-top:10px">
+      <button class="boton secundario" data-a="exportar" data-v="xlsx" ${lista.length ? '' : 'disabled'}>Descargar Excel</button>
+      <button class="boton secundario" data-a="exportar" data-v="csv" ${lista.length ? '' : 'disabled'}>Descargar CSV</button>
+    </div>`;
 }
 
 function filasExportar(lista) {
@@ -957,7 +960,18 @@ async function exportar(formato) {
   }
   cargando('Preparando el Excel…');
   try {
-    if (!window.XLSX) await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+    const datos = await construirExcel(lista);
+    await entregarArchivo(new Blob([datos], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), nombre + '.xlsx');
+  } finally {
+    cargando(false);
+  }
+}
+
+// Devuelve el Excel (hojas "Gastos" y "Resumen") de una lista de gastos.
+async function construirExcel(lista) {
+  if (!window.XLSX) await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+  const filas = filasExportar(lista);
+  {
     const X = window.XLSX;
     const filasX = filas.map(f => Object.assign({}, f, { Fecha: new Date(f.Fecha + 'T12:00:00') }));
     const hoja = X.utils.json_to_sheet(filasX, { cellDates: true, dateNF: 'dd/mm/yyyy' });
@@ -983,11 +997,64 @@ async function exportar(formato) {
     const libro = X.utils.book_new();
     X.utils.book_append_sheet(libro, hoja, 'Gastos');
     X.utils.book_append_sheet(libro, hojaR, 'Resumen');
-    const datos = X.write(libro, { bookType: 'xlsx', type: 'array', cellDates: true });
-    await entregarArchivo(new Blob([datos], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), nombre + '.xlsx');
+    return X.write(libro, { bookType: 'xlsx', type: 'array', cellDates: true });
+  }
+}
+
+// ---------- Envío a la gestoría ----------
+
+function hojaGestoria(s) {
+  const r = rango(E.periodo);
+  const lista = gastos().filter(g => enRango(g, r));
+  const pendientes = lista.filter(g => g.estado === 'por_revisar').length;
+  return `<h2>Enviar a la gestoría</h2>
+    <p class="tenue" style="margin-top:-4px">${esc(r.nombre)} · ${lista.length} ${lista.length === 1 ? 'gasto' : 'gastos'} · ${eur(sumar(lista))}</p>
+    <label class="campo"><span>Correo de la gestoría</span><input class="entrada" type="email" inputmode="email" data-h="email" value="${esc(s.email || '')}" placeholder="gestoria@ejemplo.com" autocomplete="email"></label>
+    <label class="campo"><span>Mensaje (opcional)</span><textarea class="entrada" data-h="mensaje" placeholder="Hola, te paso las facturas de ${esc(r.nombre)}.">${esc(s.mensaje || '')}</textarea></label>
+    <p class="tenue peque">Se enviará desde el Gmail del restaurante con el informe en Excel y un enlace a las facturas escaneadas, compartidas solo con ese correo.</p>
+    ${pendientes ? `<p class="descuadre">Hay ${pendientes} ${pendientes === 1 ? 'gasto' : 'gastos'} por revisar en este periodo. Se enviarán igualmente, marcados como «Por revisar».</p>` : ''}
+    <div class="dos"><button class="boton secundario" data-a="cerrarHoja">Cancelar</button><button class="boton verde" data-a="enviarGestoria">Enviar</button></div>`;
+}
+
+async function enviarGestoria(permitirEnlace) {
+  const s = H.estado;
+  const email = String(s.email || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Escribe un correo válido.');
+  const r = rango(E.periodo);
+  const lista = gastos().filter(g => enRango(g, r));
+  if (!lista.length) throw new Error('No hay gastos en este periodo.');
+  cargando('Preparando el informe…');
+  let excel;
+  try {
+    excel = { base64: await aBase64(new Blob([await construirExcel(lista)])), nombre: 'Gastos La Flor - ' + r.nombre + '.xlsx' };
   } finally {
     cargando(false);
   }
+  const res = await api('enviarGestoria', {
+    email, mensaje: s.mensaje || '', desde: r.desde, hasta: r.hasta, periodo: r.nombre, excel, permitirEnlace: !!permitirEnlace
+  }, 'Enviando a la gestoría…');
+  if (res.necesitaEnlace) {
+    const estado = s;
+    const ok = await confirmar('El correo de la gestoría no es de Google, así que no se pueden compartir las facturas solo con ella. ¿Envío un enlace abierto? (cualquiera que tenga el enlace podría ver esas facturas)', 'Sí, enviar con enlace', true);
+    if (!ok) { avisar('No se ha enviado nada.'); return; }
+    H.estado = estado;
+    return enviarGestoria(true);
+  }
+  E.datos.gestoria_email = email;
+  guardarDatos();
+  cerrarHoja();
+  avisar(`Enviado a ${email} ✓`, 'ok');
+}
+
+// ---------- Cambiar PIN ----------
+
+function hojaPin() {
+  return `<h2>Cambiar mi PIN</h2>
+    <label class="campo"><span>PIN actual</span><input class="entrada" type="password" inputmode="numeric" maxlength="4" data-h="actual" autocomplete="current-password"></label>
+    <label class="campo"><span>PIN nuevo (4 números)</span><input class="entrada" type="password" inputmode="numeric" maxlength="4" data-h="nuevo" autocomplete="new-password"></label>
+    <label class="campo"><span>Repite el PIN nuevo</span><input class="entrada" type="password" inputmode="numeric" maxlength="4" data-h="repite" autocomplete="new-password"></label>
+    <p class="tenue peque">Al cambiarlo se cerrará tu sesión en los demás móviles donde hayas entrado.</p>
+    <div class="dos"><button class="boton secundario" data-a="cerrarHoja">Cancelar</button><button class="boton" data-a="guardarPin">Cambiar</button></div>`;
 }
 
 function formatearHoja(X, hoja, columnasEuro, anchos) {
@@ -1224,6 +1291,19 @@ const ACCIONES = {
   },
   periodo: el => { E.periodo = moverPeriodo(E.periodo, Number(el.dataset.v)); pintar(); },
   exportar: el => exportar(el.dataset.v),
+  abrirGestoria: () => abrirHoja(hojaGestoria, { email: (E.datos && E.datos.gestoria_email) || '' }),
+  enviarGestoria: () => enviarGestoria(false),
+
+  // PIN
+  cambiarPin: () => abrirHoja(hojaPin, {}),
+  guardarPin: async () => {
+    const s = H.estado;
+    if (!/^\d{4}$/.test(s.nuevo || '')) throw new Error('El PIN nuevo tiene que tener 4 números.');
+    if (s.nuevo !== s.repite) throw new Error('Los dos PIN nuevos no coinciden.');
+    await api('cambiarPin', { actual: s.actual || '', nuevo: s.nuevo }, 'Cambiando el PIN…');
+    cerrarHoja();
+    avisar('PIN cambiado ✓', 'ok');
+  },
 
   // Proveedores / fijos / personas
   tabProv: el => { E.tabProv = el.dataset.v; pintar(); },
