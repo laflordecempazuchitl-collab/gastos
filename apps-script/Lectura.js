@@ -183,7 +183,8 @@ function primerToken_(s) {
 // ---------- Importes ----------
 
 function importesEn_(s) {
-  const re = /-?\d{1,3}(?:\.\d{3})+,\d{2}(?!\d)|-?\d{1,3}(?:,\d{3})+\.\d{2}(?!\d)|-?\d+[.,]\d{2}(?!\d)/g;
+  // Sin dígitos/puntos pegados delante ni detrás: así "2026.09.21" (fecha) no se toma como 2026,09 €.
+  const re = /(?<![\d.,])(?:-?\d{1,3}(?:\.\d{3})+,\d{2}|-?\d{1,3}(?:,\d{3})+\.\d{2}|-?\d+[.,]\d{2})(?![\d]|[.,]\d)/g;
   const lista = [];
   let m;
   while ((m = re.exec(s))) {

@@ -27,6 +27,7 @@ function despachar_(p) {
     case 'login': return login_(p);
     case 'importarLocal': return importarLocal_(p);
     case 'verOcr': return verOcr_(p);
+    case 'corregirSeptiembre': return corregirSeptiembre_(p);
   }
   const u = sesion_(p.token);
   switch (p.accion) {
