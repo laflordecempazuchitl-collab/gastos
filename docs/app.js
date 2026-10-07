@@ -616,6 +616,7 @@ function pintarRevisar(r) {
       ${f.verRetencion
         ? `<label class="campo"><span>Retención IRPF (se resta)</span><input class="entrada importe" inputmode="decimal" data-campo="retencion" value="${numCampo(f.retencion)}" placeholder="0,00"></label>`
         : '<button class="enlace" data-a="verRetencion">＋ Lleva retención de IRPF</button>'}
+      ${desgloseFactura(f.id)}
       <div id="descuadre"></div>
     </div>
     <div class="tarjeta"><label class="campo" style="margin:0"><span>Nota (opcional)</span><textarea class="entrada" data-campo="nota" placeholder="Ej.: arreglo de la cámara frigorífica">${esc(f.nota)}</textarea></label></div>
@@ -628,6 +629,20 @@ function pintarRevisar(r) {
     ${f.estado === 'por_revisar' ? '<button class="enlace" data-a="dejarPendiente" style="display:block;margin:10px auto 0">Dejar por revisar</button>' : ''}
     ${!nuevo && esDueno() && !puedeRepetir ? '<button class="enlace" data-a="anular" style="display:block;margin:6px auto 0;color:var(--rojo)">Anular gasto</button>' : ''}`;
   comprobarCuadre();
+}
+
+// Desglose por tipo de IVA tal como viene en la factura (solo lectura).
+function desgloseFactura(id) {
+  const g = id && gastos().find(x => x.id === id);
+  if (!g) return '';
+  const filas = [4, 10, 21].filter(t => !vacio(g['base_' + t]) || !vacio(g['iva_' + t]));
+  if (!filas.length) return '';
+  return `<div class="tarjeta" style="background:var(--crema);box-shadow:none;border:1px solid var(--linea);padding:12px;margin:0 0 12px">
+    <div class="tenue peque" style="font-weight:600;margin-bottom:6px">Según la factura</div>
+    <div class="resumen-iva" style="grid-template-columns:auto 1fr 1fr;font-size:14px">
+      <span class="tenue">Tipo</span><b class="tenue">Base</b><b class="tenue">IVA</b>
+      ${filas.map(t => `<span>${t} %</span><b>${eur(g['base_' + t])}</b><b>${eur(g['iva_' + t])}</b>`).join('')}
+    </div></div>`;
 }
 
 function campoForm(el) {
@@ -1142,6 +1157,7 @@ function filasExportar(lista) {
     'IVA': vacio(g.iva_importe) ? '' : Number(g.iva_importe),
     'Retención': Number(g.retencion) || 0,
     'Total': Number(g.total) || 0,
+    ...Object.fromEntries([4, 10, 21].flatMap(t => [[`Base ${t}%`, vacio(g['base_' + t]) ? '' : Number(g['base_' + t])], [`IVA ${t}%`, vacio(g['iva_' + t]) ? '' : Number(g['iva_' + t])]])),
     'Estado': g.estado === 'por_revisar' ? 'Por revisar' : 'Confirmado',
     'Nota': g.nota || '',
     'Archivo': g.archivo_url || ''
@@ -1208,7 +1224,8 @@ async function construirExcel(lista, cierresPeriodo = []) {
     const X = window.XLSX;
     const filasX = filas.map(f => Object.assign({}, f, { Fecha: new Date(f.Fecha + 'T12:00:00') }));
     const hoja = X.utils.json_to_sheet(filasX, { cellDates: true, dateNF: 'dd/mm/yyyy' });
-    formatearHoja(X, hoja, ['Base', 'IVA', 'Retención', 'Total'], [10, 28, 12, 14, 18, 14, 12, 8, 12, 11, 12, 12, 30, 40]);
+    formatearHoja(X, hoja, ['Base', 'IVA', 'Retención', 'Total', 'Base 4%', 'IVA 4%', 'Base 10%', 'IVA 10%', 'Base 21%', 'IVA 21%'],
+      [10, 28, 12, 14, 18, 14, 12, 8, 12, 11, 12, 10, 10, 10, 10, 10, 10, 12, 30, 40]);
 
     // Resumen por categoría y por tipo de IVA
     const resumen = [];
@@ -1220,10 +1237,15 @@ async function construirExcel(lista, cierresPeriodo = []) {
     });
     fila('TOTAL', sum(lista, 'base'), sum(lista, 'iva_importe'), sum(lista, 'retencion'), sum(lista, 'total'));
     fila('', '', '', '', '');
-    ['', ...TIPOS_IVA].forEach(t => {
-      const l = lista.filter(g => t === '' ? vacio(g.iva_pct) : Number(g.iva_pct) === t && !vacio(g.iva_pct));
-      if (l.length) fila(t === '' ? 'IVA varios tipos' : `IVA ${t} %`, sum(l, 'base'), sum(l, 'iva_importe'), sum(l, 'retencion'), sum(l, 'total'));
+    // Por tipo de IVA: se usa el desglose de la factura; si no lo hay, la base/IVA del gasto con su tipo.
+    const conDesglose = g => [4, 10, 21].some(t => !vacio(g['base_' + t]));
+    [4, 10, 21].forEach(t => {
+      const b = r2(lista.reduce((s, g) => s + (conDesglose(g) ? Number(g['base_' + t]) || 0 : Number(g.iva_pct) === t && !vacio(g.iva_pct) ? Number(g.base) || 0 : 0), 0));
+      const i = r2(lista.reduce((s, g) => s + (conDesglose(g) ? Number(g['iva_' + t]) || 0 : Number(g.iva_pct) === t && !vacio(g.iva_pct) ? Number(g.iva_importe) || 0 : 0), 0));
+      if (b || i) fila(`IVA ${t} %`, b, i, '', r2(b + i));
     });
+    const sinTipo = lista.filter(g => !conDesglose(g) && (vacio(g.iva_pct) || ![4, 10, 21].includes(Number(g.iva_pct))));
+    if (sinTipo.length) fila('Sin desglose de IVA', sum(sinTipo, 'base'), sum(sinTipo, 'iva_importe'), sum(sinTipo, 'retencion'), sum(sinTipo, 'total'));
     if (cierresPeriodo.length) {
       const ingresos = sumarCaja(cierresPeriodo);
       fila('', '', '', '', '');

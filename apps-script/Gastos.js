@@ -87,7 +87,8 @@ function moverArchivo_(archivoId, fechaIso, proveedorNombre) {
   }
 }
 
-const normNumFactura_ = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '');
+// Sin separadores ni ceros de relleno: "A-V2026-00004637175" = "A-V2026-4637175".
+const normNumFactura_ = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/0/g, '');
 
 // Busca un gasto que sea la misma factura: mismo nº y (mismo proveedor, NIF o total),
 // o mismo proveedor, fecha y total.
@@ -104,26 +105,40 @@ function buscarDuplicado_(g, gastos) {
 
 // Lee un archivo ya guardado en Drive y prepara el gasto "por revisar" (sin guardarlo).
 // Si el proveedor es nuevo y tiene un NIF válido, lo da de alta.
-function prepararGasto_(archivo, creadoPor, origen, nota) {
+// "pistas" (opcional) trae lo que ya se sabe por otro lado: {nombre, categoria, abono}.
+function prepararGasto_(archivo, creadoPor, origen, nota, pistas) {
+  pistas = pistas || {};
   const texto = leerArchivo_(archivo);
   const proveedores = leer_('Proveedores').filter(x => esVerdad_(x.activo));
   const d = analizarFactura_(texto, proveedores);
-  // Sin NIF fiable no se crea, para no llenar la lista de nombres mal leídos (el usuario lo crea con un toque).
+  // La categoría indicada manda sobre la adivinada por palabras (no sobre la de un proveedor ya conocido).
+  if (pistas.categoria && (!d.proveedor || !d.categoria)) d.categoria = pistas.categoria;
+  // En los PDF que llegan por correo, el nombre del archivo suele llevar el nº de factura y es más fiable que la lectura.
+  const numArchivo = pistas.archivo ? numDesdeNombre_(pistas.archivo) : '';
+  if (numArchivo && (numArchivo.length >= 6 || !d.num_factura)) d.num_factura = numArchivo;
+  // Sin NIF fiable (ni nombre conocido) no se crea, para no llenar la lista de nombres mal leídos.
   let prov = d.proveedor || null;
   let proveedorNuevo = false;
-  if (!prov && d.nif && nifValido_(d.nif)) {
+  const nifOk = d.nif && nifValido_(d.nif);
+  if (!prov && (nifOk || pistas.nombre)) {
     prov = conBloqueo_(() => {
-      const existente = leer_('Proveedores').find(x => normNif_(x.nif) === d.nif);
+      const todos = leer_('Proveedores');
+      const existente = (nifOk && todos.find(x => normNif_(x.nif) === d.nif)) ||
+        (pistas.nombre && todos.find(x => normTexto_(x.nombre) === normTexto_(pistas.nombre)));
       if (existente) {
         return esVerdad_(existente.activo) ? existente : actualizar_('Proveedores', existente.id, { activo: true });
       }
       proveedorNuevo = true;
       return insertar_('Proveedores', {
-        id: nuevoId_(), nombre: d.nombreSugerido || 'Proveedor ' + d.nif, nif: d.nif,
+        id: nuevoId_(), nombre: pistas.nombre || d.nombreSugerido || 'Proveedor ' + d.nif, nif: nifOk ? d.nif : '',
         categoria_habitual: d.categoria || '', activo: true, creado_en: new Date()
       });
     });
-    if (!d.categoria && prov.categoria_habitual) d.categoria = prov.categoria_habitual;
+  }
+  if (prov && prov.categoria_habitual && (!d.proveedor || !d.categoria)) d.categoria = prov.categoria_habitual;
+  if (pistas.abono) {
+    ['base', 'iva_importe', 'retencion', 'total'].forEach(k => { if (d[k]) d[k] = -Math.abs(d[k]); });
+    Object.values(d.desglose || {}).forEach(x => { x.base = -Math.abs(x.base); x.iva = -Math.abs(x.iva); });
   }
   const ahora = new Date();
   const gasto = {
@@ -150,6 +165,12 @@ function prepararGasto_(archivo, creadoPor, origen, nota) {
     modificado_en: ahora,
     ocr_texto: texto.slice(0, 45000)
   };
+  // Base e IVA de cada tipo, tal como vienen en la factura.
+  TIPOS_DESGLOSE.forEach(t => {
+    const x = d.desglose && d.desglose[t];
+    gasto['base_' + t] = x ? x.base : '';
+    gasto['iva_' + t] = x ? x.iva : '';
+  });
   return { gasto, texto, d, prov, proveedorNuevo, duplicado: buscarDuplicado_(gasto, leer_('Gastos')) };
 }
 

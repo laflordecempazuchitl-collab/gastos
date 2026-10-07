@@ -35,7 +35,7 @@ const PALABRAS_CATEGORIA = [
   [/cervez|cerveza|bebida|refresco|vino|licor|destilad|damm|mahou|moritz|heineken|coca.?cola|pepsi|agua mineral|font vella|tequila|mezcal/i, 'Bebidas'],
   [/limpie|higien|aseo|detergente|lej[ií]a|celulosa|papel/i, 'Productos de aseo'],
   [/alquiler|arrendamiento|lloguer|renta/i, 'Alquiler'],
-  [/endesa|iberdrola|naturgy|repsol|holaluz|aig[uü]es|agua|aigua|electric|gas natural|movistar|vodafone|orange|digi|fibra|internet|telef[oó]nica/i, 'Suministros'],
+  [/endesa|iberdrola|naturgy|repsol|holaluz|plenitude|aig[uü]es de|\bagua\b|\baigua\b|electric|gas natural|movistar|vodafone|orange|\bdigi\b|fibra|internet|telef[oó]nica/i, 'Suministros'],
   [/gestor|asesor|contabil|abogad/i, 'Gestoría'],
   [/repara|t[eé]cnico|mantenimiento|fontaner|electricista|cerrajer/i, 'Reparaciones'],
   [/menaje|vajilla|cuberter|utensil|hosteler[ií]a/i, 'Menaje']
@@ -44,7 +44,8 @@ const PALABRAS_CATEGORIA = [
 const HOJAS = {
   Gastos: ['id', 'fecha', 'proveedor_id', 'proveedor_nombre', 'nif', 'categoria', 'num_factura',
     'base', 'iva_pct', 'iva_importe', 'retencion', 'total', 'estado', 'archivo_url', 'archivo_id',
-    'origen', 'nota', 'recurrente_id', 'creado_por', 'creado_en', 'modificado_en', 'ocr_texto'],
+    'origen', 'nota', 'recurrente_id', 'creado_por', 'creado_en', 'modificado_en', 'ocr_texto',
+    'base_4', 'iva_4', 'base_10', 'iva_10', 'base_21', 'iva_21'],
   Proveedores: ['id', 'nombre', 'nif', 'categoria_habitual', 'activo', 'creado_en'],
   Recurrentes: ['id', 'concepto', 'proveedor_id', 'categoria', 'base', 'iva_pct', 'retencion',
     'importe', 'dia_del_mes', 'activo', 'ultimo_mes'],
@@ -59,7 +60,9 @@ const HOJAS = {
 // Columnas que deben guardarse como texto (para que Sheets no las convierta en números).
 const COLUMNAS_TEXTO = ['id', 'proveedor_id', 'nif', 'num_factura', 'archivo_id', 'recurrente_id',
   'creado_por', 'usuario_id', 'token_hash', 'pin_hash', 'sal', 'ultimo_mes', 'clave', 'gasto_id'];
-const COLUMNAS_EUROS = ['base', 'iva_importe', 'retencion', 'total', 'importe', 'efectivo', 'tarjeta'];
+const COLUMNAS_EUROS = ['base', 'iva_importe', 'retencion', 'total', 'importe', 'efectivo', 'tarjeta',
+  'base_4', 'iva_4', 'base_10', 'iva_10', 'base_21', 'iva_21'];
+const TIPOS_DESGLOSE = [4, 10, 21];
 
 function prop_(clave) {
   return PropertiesService.getScriptProperties().getProperty(clave);

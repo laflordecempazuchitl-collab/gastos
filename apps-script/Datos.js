@@ -4,8 +4,26 @@ function libro_() {
   return SpreadsheetApp.openById(prop_('HOJA_ID'));
 }
 
+const cabecerasRevisadas_ = {};
+
 function hoja_(nombre) {
-  return libro_().getSheetByName(nombre) || crearHoja_(nombre);
+  const hoja = libro_().getSheetByName(nombre) || crearHoja_(nombre);
+  if (hoja && HOJAS[nombre] && !cabecerasRevisadas_[nombre]) {
+    cabecerasRevisadas_[nombre] = true;
+    asegurarColumnas_(hoja, HOJAS[nombre]);
+  }
+  return hoja;
+}
+
+// Si la app añade columnas nuevas, se escriben al final de la cabecera de la hoja ya existente.
+function asegurarColumnas_(hoja, columnas) {
+  const actuales = hoja.getRange(1, 1, 1, Math.max(hoja.getLastColumn(), 1)).getValues()[0];
+  if (actuales.length >= columnas.length && actuales[columnas.length - 1] === columnas[columnas.length - 1]) return;
+  if (hoja.getMaxColumns() < columnas.length) hoja.insertColumnsAfter(hoja.getMaxColumns(), columnas.length - hoja.getMaxColumns());
+  hoja.getRange(1, 1, 1, columnas.length).setValues([columnas]).setFontWeight('bold').setBackground('#FBF7F2');
+  columnas.forEach((col, i) => {
+    if (COLUMNAS_EUROS.includes(col) && i >= actuales.length) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('#,##0.00 €');
+  });
 }
 
 // Crea una pestaña nueva (de las añadidas después de "configurar") con su cabecera y formatos.

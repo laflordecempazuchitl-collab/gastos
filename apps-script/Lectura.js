@@ -93,7 +93,7 @@ function normTexto_(s) {
 }
 
 function nombreSugerido_(lineas) {
-  const propio = /cempaz|la flor de/i;
+  const propio = /cempaz|la flor de|diana jocelin|cruz ortiz/i;
   const ruido = /factura|recibo|fecha|cliente|n[º°]|tel[eé]f|www|@|c\/|calle|avda|direcci|p[aá]gina|^\d/i;
   const primeras = lineas.slice(0, 12).filter(l => !propio.test(l));
   const sociedad = primeras.find(l => /\b(S\.?\s?L\.?\s?U?|S\.?\s?A\.?|S\.?\s?C\.?\s?P|S\.?\s?COOP|C\.?\s?B)\.?\s*$|sociedad/i.test(l) && l.length <= 60);
@@ -152,10 +152,18 @@ function buscarNumFactura_(lineas) {
     const m = lineas[i].match(etiqueta);
     if (!m || /(fecha|data)\s*(de\s+)?$/i.test(lineas[i].slice(0, m.index))) continue;
     const resto = lineas[i].slice(m.index + m[0].length);
-    const tok = primerToken_(resto) || (/fecha|data/i.test(lineas[i + 1] || '') ? '' : primerToken_(lineas[i + 1] || ''));
+    const tok = primerToken_(resto) || (/fecha|data|cif|nif/i.test(lineas[i + 1] || '') ? '' : primerToken_(lineas[i + 1] || ''));
     if (tok) return tok;
   }
   return '';
+}
+
+// Nº de factura sacado del nombre del archivo (p. ej. "Fra_26-013968.pdf", "SD_INV_4864276229.pdf").
+function numDesdeNombre_(nombre) {
+  const s = String(nombre || '').replace(/\.[a-z0-9]+$/i, '')
+    .replace(/\b(factura|facturas|venta|fra|invoice|documento|pdf|abono|sd_inv|sd_cre)\b/ig, ' ');
+  const toks = s.split(/[\s_]+/).filter(t => (t.match(/\d/g) || []).length >= 3 && !/^\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}$/.test(t));
+  return toks.length ? toks[toks.length - 1].replace(/^[-.]+|[-.]+$/g, '').toUpperCase() : '';
 }
 
 function primerToken_(s) {
@@ -165,6 +173,8 @@ function primerToken_(s) {
     if (!/\d/.test(c) || c.length < 2 || c.length > 20) continue;
     if (/^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}$/.test(c)) continue;
     if (/^\d+[.,]\d{2}$/.test(c) || /%$/.test(c)) continue;
+    const posibleNif = normNif_(c);
+    if (/^([A-HJ-NP-SUVW]\d{7}[0-9A-J]|\d{8}[A-Z]|[XYZ]\d{7}[A-Z])$/.test(posibleNif) && nifValido_(posibleNif)) continue; // es un NIF/CIF
     return c.toUpperCase();
   }
   return '';
@@ -195,7 +205,10 @@ function importesConEtiqueta_(lineas, re, excluir, soloPrimero) {
   lineas.forEach((l, i) => {
     if (!re.test(l) || (excluir && excluir.test(l))) return;
     let nums = importesEn_(l).filter(n => n > 0);
-    if (!nums.length) nums = importesEn_(lineas[i + 1] || '').filter(n => n > 0);
+    const sig = lineas[i + 1] || '';
+    if (!nums.length && !/saldo|pendiente|deuda|vencim/i.test(sig) && !(excluir && excluir.test(sig))) {
+      nums = importesEn_(sig).filter(n => n > 0);
+    }
     if (soloPrimero) nums = nums.slice(0, 1);
     lista.push(...nums);
   });
@@ -207,9 +220,61 @@ function buscarImportes_(lineas) {
   lineas.forEach(l => todos.push(...importesEn_(l).filter(n => n > 0)));
   if (!todos.length) return {};
 
-  const totales = importesConEtiqueta_(lineas, /total|a pagar|importe\s+factura|l[ií]quido/i,
-    /sub\s*-?total|total\s*(base|iva|bruto|neto|l[ií]neas?|dto|descuento|cuota)|base/i);
-  const total = totales.length ? Math.max(...totales) : Math.max(...todos);
+  // Google desordena las tablas, así que el total se elige por orden de confianza:
+  // 1) Importe escrito justo detrás de "Importe final", "Total factura", "Total a pagar" o "TOTAL".
+  const noTotal = /sub\s*-?total|total\s*(base|iva|bruto|neto|l[ií]neas?|dto|descuento|cuota|promocion|unidades|art)|il[ií]quido|saldo/i;
+  const etiquetaTotal = /(importe\s+final|total\s+a\s+pagar|total\s+factura|total\s*\(?(?:€|eur)\)?|^\s*total\b)\s*:?/i;
+  const fijos = [];
+  lineas.forEach(l => {
+    if (noTotal.test(l)) return;
+    const m = l.match(etiquetaTotal);
+    if (!m) return;
+    const n = importesEn_(l.slice(m.index + m[0].length)).filter(x => x > 0);
+    if (n.length) fijos.push(n[0]);
+  });
+  // 2) La suma de las parejas base + IVA que aparecen (p. ej. Trademex 104,90+10,49 + 16,20+3,40 + 21,95+0,88).
+  const unicos = [...new Set(todos)];
+  const parejas = [];
+  unicos.forEach(b => {
+    if ([4, 5, 10, 21, 100].includes(b)) return; // los propios porcentajes no son bases
+    for (const t of [4, 5, 10, 21]) {
+      const c = unicos.find(x => x < b && x >= 0.05 && Math.abs(x - b * t / 100) <= 0.01);
+      if (c !== undefined) { parejas.push({ b, c, t }); break; }
+    }
+  });
+  // Puede colarse alguna pareja falsa de la tabla de productos: se busca el grupo de parejas cuya
+  // suma base + IVA sea un importe que aparece en la factura, quedándose con la suma mayor (el total).
+  let elegidas = [], totalParejas;
+  const n = Math.min(parejas.length, 12);
+  for (let m = (1 << n) - 1; m > 0; m--) {
+    const grupo = parejas.slice(0, n).filter((_, i) => m & (1 << i));
+    if (new Set(grupo.map(p => p.c)).size < grupo.length) continue; // cada cuota solo puede ir con una base
+    const s = r2_(grupo.reduce((a, p) => a + p.b + p.c, 0));
+    const x = unicos.find(v => Math.abs(v - s) <= 0.02 && !grupo.some(p => p.b === v));
+    if (x === undefined) continue;
+    if (totalParejas === undefined || x > totalParejas || (x === totalParejas && grupo.length > elegidas.length)) {
+      elegidas = grupo; totalParejas = x;
+    }
+  }
+  const sumaBase = r2_(elegidas.reduce((s, p) => s + p.b, 0)), sumaCuota = r2_(elegidas.reduce((s, p) => s + p.c, 0));
+  const cuadraDesglose = x => elegidas.length && Math.abs(sumaBase + sumaCuota - x) <= 0.02;
+  // 3) Importes con etiqueta de total (también en la línea siguiente) que sean base + IVA de algo.
+  const totales = importesConEtiqueta_(lineas, /total|a pagar|importe\s+factura|\bl[ií]quido/i, noTotal);
+  const cuadran = [];
+  todos.forEach(b => [4, 5, 10, 21].forEach(t => {
+    const tot = todos.find(x => x > b && Math.abs(x - b * (1 + t / 100)) <= 0.02);
+    if (tot) cuadran.push({ b, t, tot });
+  }));
+  const valido = x => cuadran.some(c => Math.abs(c.tot - x) <= 0.01) || cuadraDesglose(x);
+  const totalesValidos = totales.filter(valido);
+  // La suma de parejas va primero: en tablas desordenadas "Total factura" puede ir seguido de la base
+  // (Frutas Antonio: "Total factura 23,22 ..." cuando el total real es 23,22+0,93+9,05+0,91 = 34,11).
+  const total = totalParejas !== undefined ? totalParejas
+    : fijos.length ? fijos[fijos.length - 1]
+    : totalesValidos.length ? Math.max(...totalesValidos)
+    : cuadran.length ? Math.max(...cuadran.map(c => c.tot))
+    : totales.length ? Math.max(...totales) : Math.max(...todos);
+  const nDesglose = elegidas.length;
 
   const tiposTexto = [];
   lineas.forEach(l => {
@@ -223,12 +288,20 @@ function buscarImportes_(lineas) {
   });
   const tipos = tiposTexto.length ? tiposTexto.concat([10, 21, 4].filter(t => !tiposTexto.includes(t))) : [10, 21, 4];
 
+  // 0) Desglose por tipo que cuadra con el total
+  if (cuadraDesglose(total)) {
+    const desglose = {};
+    elegidas.forEach(p => { const d = desglose[p.t] = desglose[p.t] || { base: 0, iva: 0 }; d.base = r2_(d.base + p.b); d.iva = r2_(d.iva + p.c); });
+    const tiposUsados = Object.keys(desglose);
+    return { base: r2_(sumaBase), iva_pct: tiposUsados.length === 1 ? Number(tiposUsados[0]) : '', iva_importe: r2_(sumaCuota), retencion: 0, total: r2_(total), desglose };
+  }
+
   // 1) Un solo tipo de IVA: base * (1 + tipo) = total
   for (const t of tipos) {
     for (const b of todos) {
       if (b >= total) continue;
       if (Math.abs(b * (1 + t / 100) - total) <= 0.03) {
-        return { base: r2_(b), iva_pct: t, iva_importe: r2_(total - b), retencion: 0, total: r2_(total) };
+        return { base: r2_(b), iva_pct: t, iva_importe: r2_(total - b), retencion: 0, total: r2_(total), desglose: { [t]: { base: r2_(b), iva: r2_(total - b) } } };
       }
     }
   }
@@ -238,7 +311,7 @@ function buscarImportes_(lineas) {
       for (const ret of [19, 15, 7]) {
         for (const b of todos) {
           if (Math.abs(b * (1 + t / 100 - ret / 100) - total) <= 0.03) {
-            return { base: r2_(b), iva_pct: t, iva_importe: r2_(b * t / 100), retencion: r2_(b * ret / 100), total: r2_(total) };
+            return { base: r2_(b), iva_pct: t, iva_importe: r2_(b * t / 100), retencion: r2_(b * ret / 100), total: r2_(total), desglose: { [t]: { base: r2_(b), iva: r2_(b * t / 100) } } };
           }
         }
       }
@@ -252,13 +325,14 @@ function buscarImportes_(lineas) {
     const suma = r2_(bases.reduce((s, b) => s + b, 0));
     const base = unica && tiposTexto.length <= 1 ? unica : (suma < total ? suma : Math.max(...bases));
     const iva = r2_(total - base);
-    return { base: r2_(base), iva_pct: tiposTexto.length === 1 ? tiposTexto[0] : '', iva_importe: iva, retencion: 0, total: r2_(total) };
+    const unTipo = tiposTexto.length === 1 ? tiposTexto[0] : '';
+    return { base: r2_(base), iva_pct: unTipo, iva_importe: iva, retencion: 0, total: r2_(total), desglose: unTipo ? { [unTipo]: { base: r2_(base), iva } } : null };
   }
   // 4) Solo el total: se calcula con el tipo de IVA que aparezca (o 10 %)
   if (tiposTexto.length === 1) {
     const t = tiposTexto[0];
     const base = r2_(total / (1 + t / 100));
-    return { base, iva_pct: t, iva_importe: r2_(total - base), retencion: 0, total: r2_(total) };
+    return { base, iva_pct: t, iva_importe: r2_(total - base), retencion: 0, total: r2_(total), desglose: { [t]: { base, iva: r2_(total - base) } } };
   }
   return { total: r2_(total) };
 }
