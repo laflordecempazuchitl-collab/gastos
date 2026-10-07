@@ -335,7 +335,7 @@ function avisoCierre() {
 function filaGasto(g) {
   const grupo = grupoDe(g.categoria);
   const titulo = g.proveedor_nombre || g.nota || g.categoria || 'Sin proveedor';
-  const detalle = [fechaCorta(g.fecha), g.categoria || 'Sin categoría', g.num_factura ? 'Nº ' + g.num_factura : ''].filter(Boolean).join(' · ');
+  const detalle = [g.origen === 'correo' ? '✉️ ' + fechaCorta(g.fecha) : fechaCorta(g.fecha), g.categoria || 'Sin categoría', g.num_factura ? 'Nº ' + g.num_factura : ''].filter(Boolean).join(' · ');
   let marca = '';
   if (g.estado === 'por_revisar') marca = '<span class="etiqueta">Por revisar</span>';
   else if (g.origen === 'recurrente' && !g.archivo_id) marca = '<span class="etiqueta gris">Falta recibo</span>';
@@ -508,7 +508,7 @@ async function procesarArchivo(input) {
   if (r.proveedor) reemplazarProveedor(r.proveedor);
   guardarDatos();
   if (previa) E.vistaPrevia[r.gasto.id] = previa;
-  E.sugerencia[r.gasto.id] = Object.assign({}, r.sugerencia, { nuevo: !!r.proveedorNuevo });
+  E.sugerencia[r.gasto.id] = Object.assign({}, r.sugerencia, { nuevo: !!r.proveedorNuevo, duplicado: r.duplicado || null });
   guardarLS('sugerencias', E.sugerencia);
   if (!r.leido) avisar('No se ha podido leer el texto. Rellena los datos a mano.', 'error');
   E.form = null;
@@ -559,7 +559,7 @@ function pintarRevisar(r) {
   const previa = E.vistaPrevia[f.id];
   const cajaArchivo = f.archivo_url || previa
     ? `<div class="tarjeta vista-previa">${previa ? `<img src="${previa}" alt="Factura">` : '<span class="doc">' + (f.origen === 'pdf' ? 'PDF' : 'FOTO') + '</span>'}
-        <div style="flex:1"><b>${f.origen === 'pdf' ? 'PDF de la factura' : 'Foto de la factura'}</b><br>
+        <div style="flex:1"><b>${f.origen === 'correo' ? '✉️ Llegó por correo' : f.origen === 'pdf' ? 'PDF de la factura' : 'Foto de la factura'}</b><br>
         ${f.archivo_url ? `<a href="${esc(f.archivo_url)}" target="_blank" rel="noopener">Ver original</a>` : ''}</div></div>`
     : (!nuevo ? `<div class="tarjeta vista-previa"><span class="doc">—</span><div style="flex:1"><b>Sin recibo</b><br><a href="#anadir/adjuntar/${esc(f.id)}">Adjuntar recibo o factura</a></div></div>` : '');
 
@@ -589,10 +589,16 @@ function pintarRevisar(r) {
     `<button class="chip ${f.iva_pct === '' ? 'activo' : ''}" data-a="ivaPct" data-v="">Varios</button>`;
 
   const puedeRepetir = f.estado === 'por_revisar' && ['foto', 'galeria', 'pdf'].includes(f.origen);
+  const delCorreo = f.estado === 'por_revisar' && f.origen === 'correo';
+  const dup = sug.duplicado && gastos().find(x => x.id === sug.duplicado.id);
+  const avisoDup = dup ? `<div class="descuadre"><b>Esta factura ya está apuntada</b>: ${esc(dup.proveedor_nombre || dup.categoria || '')} del ${fechaCorta(dup.fecha)} por ${eur(dup.total)}${dup.origen === 'correo' ? ' (llegó por correo)' : ''}.
+      <div class="dos" style="margin-top:10px"><a class="boton secundario" href="#revisar/${esc(dup.id)}" style="min-height:44px;font-size:15px">Ver la otra</a>
+      <button class="boton peligro" data-a="descartarCopia" style="min-height:44px;font-size:15px">Descartar esta</button></div></div>` : '';
 
   $('#app').innerHTML = `
     <div class="cabecera"><button class="volver" data-a="atras" aria-label="Volver">‹</button>
       <div style="flex:1"><p class="sub">${f.estado === 'por_revisar' ? 'Comprueba los datos y guarda' : nuevo ? 'Gasto sin factura escaneada' : 'Gasto confirmado'}</p><h1>${titulo}</h1></div></div>
+    ${avisoDup}
     ${cajaArchivo}
     <div class="tarjeta">${cajaProv}</div>
     <div class="tarjeta"><h2>Categoría</h2>${chipsCat}</div>
@@ -614,7 +620,9 @@ function pintarRevisar(r) {
     </div>
     <div class="tarjeta"><label class="campo" style="margin:0"><span>Nota (opcional)</span><textarea class="entrada" data-campo="nota" placeholder="Ej.: arreglo de la cámara frigorífica">${esc(f.nota)}</textarea></label></div>
     <div class="botones">
-      ${puedeRepetir ? '<button class="boton secundario" data-a="repetirFoto">Repetir foto</button>' : '<button class="boton secundario" data-a="atras">Cancelar</button>'}
+      ${puedeRepetir ? '<button class="boton secundario" data-a="repetirFoto">Repetir foto</button>'
+        : delCorreo ? '<button class="boton secundario" data-a="descartarCopia">No es factura</button>'
+        : '<button class="boton secundario" data-a="atras">Cancelar</button>'}
       <button class="boton" data-a="guardarGasto">Guardar gasto</button>
     </div>
     ${f.estado === 'por_revisar' ? '<button class="enlace" data-a="dejarPendiente" style="display:block;margin:10px auto 0">Dejar por revisar</button>' : ''}
@@ -1506,6 +1514,18 @@ const ACCIONES = {
     guardarDatos();
     E.form = null;
     location.replace('#anadir');
+  },
+  descartarCopia: async () => {
+    if (!(await confirmar('¿Descartar esta factura? Se quitará de la lista y su archivo irá a la papelera de Drive.', 'Descartar', true))) return;
+    const id = E.form.id;
+    await api('descartar', { id }, 'Descartando…');
+    E.datos.gastos = gastos().filter(g => g.id !== id);
+    delete E.sugerencia[id];
+    guardarLS('sugerencias', E.sugerencia);
+    guardarDatos();
+    E.form = null;
+    avisar('Descartada', 'ok');
+    location.hash = E.anterior || 'inicio';
   },
   anular: async () => {
     if (!(await confirmar('¿Anular este gasto? Dejará de contar en los totales (seguirá en la hoja de cálculo).', 'Anular gasto', true))) return;

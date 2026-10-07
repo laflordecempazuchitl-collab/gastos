@@ -24,7 +24,6 @@ function enviarGestoria_(u, p) {
     d.setDate(1);
   }
   const conArchivo = gastos.filter(g => g.archivo_id);
-  conArchivo.forEach(g => moverAlMes_(g.archivo_id, g.fecha)); // por si alguno quedó en otra carpeta
   const carpetas = meses
     .filter(m => conArchivo.some(g => g.fecha.slice(0, 7) === m))
     .map(m => ({ mes: m, carpeta: carpetaMes_(m + '-01') }));

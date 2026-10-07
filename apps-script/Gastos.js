@@ -69,33 +69,46 @@ function guardarArchivo_(a, nombreBase, fechaIso) {
   return carpetaMes_(fechaIso || hoyISO_()).createFile(blob);
 }
 
-// Cada archivo vive en la carpeta del mes de su factura (así se puede compartir el mes con la gestoría).
-function moverAlMes_(archivoId, fechaIso) {
+// Carpeta Facturas/AAAA/AAAA-MM/Proveedor (sin proveedor, la del mes).
+function carpetaFactura_(fechaIso, proveedorNombre) {
+  const mes = carpetaMes_(fechaIso);
+  const nombre = String(proveedorNombre || '').replace(/[\\\/:*?"<>|]+/g, '-').trim().slice(0, 60);
+  if (!nombre) return mes;
+  const it = mes.getFoldersByName(nombre);
+  return it.hasNext() ? it.next() : mes.createFolder(nombre);
+}
+
+// Cada archivo vive en la carpeta de su mes y su proveedor (así se puede compartir el mes con la gestoría).
+function moverArchivo_(archivoId, fechaIso, proveedorNombre) {
   try {
-    DriveApp.getFileById(archivoId).moveTo(carpetaMes_(fechaIso));
+    DriveApp.getFileById(archivoId).moveTo(carpetaFactura_(fechaIso, proveedorNombre));
   } catch (e) {
     console.error(e);
   }
 }
 
-function leerArchivo_(archivo) {
-  try {
-    return ocr_(archivo);
-  } catch (e) {
-    console.error('OCR: ' + (e && e.stack || e));
-    return '';
-  }
+const normNumFactura_ = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '');
+
+// Busca un gasto que sea la misma factura: mismo nº y (mismo proveedor, NIF o total),
+// o mismo proveedor, fecha y total.
+function buscarDuplicado_(g, gastos) {
+  const num = normNumFactura_(g.num_factura);
+  const total = Number(g.total) || 0;
+  const mismoProv = x => (g.proveedor_id && String(x.proveedor_id) === String(g.proveedor_id)) ||
+    (g.nif && normNif_(x.nif) === normNif_(g.nif));
+  return gastos.find(x => x.id !== g.id && x.estado !== 'anulado' && (
+    (num && normNumFactura_(x.num_factura) === num && (mismoProv(x) || (total && Number(x.total) === total))) ||
+    (total && mismoProv(x) && x.fecha === g.fecha && Number(x.total) === total)
+  )) || null;
 }
 
-// Sube una factura: la guarda en Drive, la lee y crea el gasto "por revisar" con lo que encuentre.
-function subir_(u, p) {
-  const id = nuevoId_();
-  const archivo = guardarArchivo_(p.archivo, hoyISO_() + ' ' + id);
+// Lee un archivo ya guardado en Drive y prepara el gasto "por revisar" (sin guardarlo).
+// Si el proveedor es nuevo y tiene un NIF válido, lo da de alta.
+function prepararGasto_(archivo, creadoPor, origen, nota) {
   const texto = leerArchivo_(archivo);
   const proveedores = leer_('Proveedores').filter(x => esVerdad_(x.activo));
   const d = analizarFactura_(texto, proveedores);
-  // Proveedor nuevo con NIF válido: se da de alta solo. Sin NIF fiable no se crea,
-  // para no llenar la lista de nombres mal leídos (el usuario lo crea con un toque).
+  // Sin NIF fiable no se crea, para no llenar la lista de nombres mal leídos (el usuario lo crea con un toque).
   let prov = d.proveedor || null;
   let proveedorNuevo = false;
   if (!prov && d.nif && nifValido_(d.nif)) {
@@ -114,7 +127,7 @@ function subir_(u, p) {
   }
   const ahora = new Date();
   const gasto = {
-    id,
+    id: nuevoId_(),
     fecha: d.fecha || hoyISO_(),
     proveedor_id: prov ? prov.id : '',
     proveedor_nombre: prov ? prov.nombre : '',
@@ -129,22 +142,43 @@ function subir_(u, p) {
     estado: 'por_revisar',
     archivo_url: archivo.getUrl(),
     archivo_id: archivo.getId(),
-    origen: ['foto', 'galeria', 'pdf'].includes(p.origen) ? p.origen : 'foto',
-    nota: '',
+    origen,
+    nota: nota || '',
     recurrente_id: '',
-    creado_por: u.id,
+    creado_por: creadoPor,
     creado_en: ahora,
     modificado_en: ahora,
     ocr_texto: texto.slice(0, 45000)
   };
-  if (gasto.fecha.slice(0, 7) !== hoyISO_().slice(0, 7)) moverAlMes_(gasto.archivo_id, gasto.fecha);
-  conBloqueo_(() => insertar_('Gastos', gasto));
+  return { gasto, texto, d, prov, proveedorNuevo, duplicado: buscarDuplicado_(gasto, leer_('Gastos')) };
+}
+
+function leerArchivo_(archivo) {
+  try {
+    return ocr_(archivo);
+  } catch (e) {
+    console.error('OCR: ' + (e && e.stack || e));
+    return '';
+  }
+}
+
+// Sube una factura: la guarda en Drive, la lee y crea el gasto "por revisar" con lo que encuentre.
+// Si ya existe la misma factura, se avisa para que el usuario la descarte.
+function subir_(u, p) {
+  const archivo = guardarArchivo_(p.archivo, hoyISO_() + ' ' + nuevoId_());
+  const origen = ['foto', 'galeria', 'pdf'].includes(p.origen) ? p.origen : 'foto';
+  const r = prepararGasto_(archivo, u.id, origen, '');
+  const g = r.gasto;
+  moverArchivo_(g.archivo_id, g.fecha, g.proveedor_nombre);
+  conBloqueo_(() => insertar_('Gastos', g));
+  const dup = r.duplicado;
   return {
-    gasto: limpiarGasto_(gasto),
-    leido: !!texto,
-    proveedor: prov ? limpiarProveedor_(prov) : null,
-    proveedorNuevo,
-    sugerencia: { nombre: d.nombreSugerido || '', nif: prov ? '' : (d.nif || '') }
+    gasto: limpiarGasto_(g),
+    leido: !!r.texto,
+    proveedor: r.prov ? limpiarProveedor_(r.prov) : null,
+    proveedorNuevo: r.proveedorNuevo,
+    duplicado: dup ? { id: dup.id, fecha: normalizar_(dup.fecha), total: dup.total, origen: dup.origen, num_factura: dup.num_factura } : null,
+    sugerencia: { nombre: r.d.nombreSugerido || '', nif: r.prov ? '' : (r.d.nif || '') }
   };
 }
 
@@ -217,7 +251,7 @@ function ordenarArchivo_(g) {
     const nombre = [g.fecha, g.proveedor_nombre || g.categoria, g.num_factura].filter(Boolean).join(' ')
       .replace(/[\\\/:*?"<>|]+/g, '-').slice(0, 120);
     archivo.setName(nombre + ext);
-    archivo.moveTo(carpetaMes_(g.fecha));
+    archivo.moveTo(carpetaFactura_(g.fecha, g.proveedor_nombre));
   } catch (e) {
     console.error(e);
   }
@@ -226,7 +260,7 @@ function ordenarArchivo_(g) {
 // "Repetir foto": borra un gasto que aún está por revisar y manda su archivo a la papelera.
 function descartar_(u, p) {
   const g = gastoPermitido_(u, p.id);
-  if (g.estado !== 'por_revisar' || g.origen === 'recurrente') throw new Error('Este gasto no se puede descartar.');
+  if (g.estado !== 'por_revisar' || !['foto', 'galeria', 'pdf', 'correo'].includes(g.origen)) throw new Error('Este gasto no se puede descartar.');
   conBloqueo_(() => borrarFila_('Gastos', g.id));
   if (g.archivo_id) {
     try { DriveApp.getFileById(g.archivo_id).setTrashed(true); } catch (e) { console.error(e); }

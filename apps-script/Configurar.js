@@ -50,9 +50,11 @@ function configurar() {
   });
 
   ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'apuntarRecurrentes')
+    .filter(t => ['apuntarRecurrentes', 'importarCorreos'].includes(t.getHandlerFunction()))
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('apuntarRecurrentes').timeBased().everyDays(1).atHour(6).inTimezone(ZONA).create();
+  // Facturas del correo: cada noche hacia las 23:30.
+  ScriptApp.newTrigger('importarCorreos').timeBased().everyDays(1).atHour(23).nearMinute(30).inTimezone(ZONA).create();
 
   console.log('Carpeta: ' + carpeta.getUrl());
   console.log('Hoja: ' + libro.getUrl());
