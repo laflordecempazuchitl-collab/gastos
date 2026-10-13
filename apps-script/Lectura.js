@@ -147,7 +147,8 @@ function buscarFecha_(lineas) {
 // ---------- Número de factura ----------
 
 function buscarNumFactura_(lineas) {
-  const etiqueta = /(?:n[º°o]\.?|n[uú]m(?:ero)?\.?|no\.)\s*(?:de\s+)?(?:factura|fra)\.?|(?:factura|fra\.?|invoice)\s*(?:n[º°o]\.?|n[uú]m(?:ero)?\.?|no\.?|#)?/i;
+  // \b para no confundir "Fra" con palabras como "Franca" (Zona Franca).
+  const etiqueta = /(?:n[º°o]\.?|n[uú]m(?:ero)?\.?|no\.)\s*(?:de\s+)?\b(?:factura|fra)\b\.?|\b(?:factura|fra|invoice)\b\.?\s*(?:n[º°o]\.?|n[uú]m(?:ero)?\.?|no\.?|#)?/i;
   for (let i = 0; i < lineas.length; i++) {
     const m = lineas[i].match(etiqueta);
     if (!m || /(fecha|data)\s*(de\s+)?$/i.test(lineas[i].slice(0, m.index))) continue;
@@ -170,7 +171,7 @@ function primerToken_(s) {
   const toks = s.replace(/^[\s:.#\-]+/, '').split(/\s+/).slice(0, 3);
   for (const t of toks) {
     const c = t.replace(/[,;:)]+$/, '').replace(/^[(]+/, '');
-    if (!/\d/.test(c) || c.length < 2 || c.length > 20) continue;
+    if (!/\d/.test(c) || c.length < 2 || c.length > 30) continue;
     if (/^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}$/.test(c)) continue;
     if (/^\d+[.,]\d{2}$/.test(c) || /%$/.test(c)) continue;
     const posibleNif = normNif_(c);
@@ -219,37 +220,51 @@ function importesConEtiqueta_(lineas, re, excluir, soloPrimero) {
 function buscarImportes_(lineas) {
   const todos = [];
   lineas.forEach(l => todos.push(...importesEn_(l).filter(n => n > 0)));
-  if (!todos.length) return {};
+  // Sin ningún importe distinto de 0: si la factura declara un total de 0,00 (p. ej. regalos de Delta), es 0.
+  if (!todos.length) {
+    return /(importe\s+final|total\s+a\s+pagar|total\s+factura)\s*:?\s*0[.,]00\b/i.test(lineas.join(' '))
+      ? { base: 0, iva_importe: 0, retencion: 0, total: 0 } : {};
+  }
 
   // Google desordena las tablas, así que el total se elige por orden de confianza:
   // 1) Importe escrito justo detrás de "Importe final", "Total factura", "Total a pagar" o "TOTAL".
   const noTotal = /sub\s*-?total|total\s*(base|iva|bruto|neto|l[ií]neas?|dto|descuento|cuota|promocion|unidades|art)|il[ií]quido|saldo/i;
   const etiquetaTotal = /(importe\s+final|total\s+a\s+pagar|total\s+factura|total\s*\(?(?:€|eur)\)?|^\s*total\b)\s*:?/i;
-  const fijos = [];
+  // "Total incluido IVA" (Makro) manda sobre un "Total:" suelto, que allí es el importe sin IVA.
+  const etiquetaFuerte = /(total\s+incluido\s+iva(?:\/igic)?|importe\s+final|total\s+a\s+pagar|total\s+a\s+cobrar|total\s+factura)\s*:?/i;
+  const fijos = [], fuertes = [];
+  let ceroDeclarado = false;
   lineas.forEach(l => {
     if (noTotal.test(l)) return;
-    const m = l.match(etiquetaTotal);
+    const mf = l.match(etiquetaFuerte);
+    const m = mf || l.match(etiquetaTotal);
     if (!m) return;
-    const n = importesEn_(l.slice(m.index + m[0].length)).filter(x => x > 0);
-    if (n.length) fijos.push(n[0]);
+    const resto = l.slice(m.index + m[0].length);
+    const n = importesEn_(resto).filter(x => x > 0);
+    if (n.length) (mf ? fuertes : fijos).push(n[0]);
+    else if (mf && /^\s*0[.,]00\b/.test(resto)) ceroDeclarado = true;
   });
+  if (fuertes.length) fijos.push(...fuertes); // los fuertes quedan al final y ganan
+  if (!fijos.length && ceroDeclarado && todos.every(x => x === 0)) return { base: 0, iva_importe: 0, retencion: 0, total: 0 };
   // 2) La suma de las parejas base + IVA que aparecen (p. ej. Trademex 104,90+10,49 + 16,20+3,40 + 21,95+0,88).
   const unicos = [...new Set(todos)];
   const parejas = [];
   unicos.forEach(b => {
     if ([4, 5, 10, 21, 100].includes(b)) return; // los propios porcentajes no son bases
+    // Se guardan todas las posibilidades (p. ej. 30,89 → 1,55 al 5 % o 6,49 al 21 %); luego se elige el grupo que cuadra.
     for (const t of [4, 5, 10, 21]) {
       const c = unicos.find(x => x < b && x >= 0.05 && Math.abs(x - b * t / 100) <= 0.01);
-      if (c !== undefined) { parejas.push({ b, c, t }); break; }
+      if (c !== undefined) parejas.push({ b, c, t });
     }
   });
   // Puede colarse alguna pareja falsa de la tabla de productos: se busca el grupo de parejas cuya
   // suma base + IVA sea un importe que aparece en la factura, quedándose con la suma mayor (el total).
   let elegidas = [], totalParejas;
-  const n = Math.min(parejas.length, 12);
+  const n = Math.min(parejas.length, 14);
   for (let m = (1 << n) - 1; m > 0; m--) {
     const grupo = parejas.slice(0, n).filter((_, i) => m & (1 << i));
-    if (new Set(grupo.map(p => p.c)).size < grupo.length) continue; // cada cuota solo puede ir con una base
+    // cada base y cada cuota solo pueden usarse una vez
+    if (new Set(grupo.map(p => p.c)).size < grupo.length || new Set(grupo.map(p => p.b)).size < grupo.length) continue;
     const s = r2_(grupo.reduce((a, p) => a + p.b + p.c, 0));
     const x = unicos.find(v => Math.abs(v - s) <= 0.02 && !grupo.some(p => p.b === v));
     if (x === undefined) continue;

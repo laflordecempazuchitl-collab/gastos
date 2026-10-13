@@ -97,9 +97,11 @@ function buscarDuplicado_(g, gastos) {
   const total = Number(g.total) || 0;
   const mismoProv = x => (g.proveedor_id && String(x.proveedor_id) === String(g.proveedor_id)) ||
     (g.nif && normNif_(x.nif) === normNif_(g.nif));
+  // Si los dos documentos tienen número y es distinto, son documentos distintos (p. ej. la factura de Makro
+  // y el albarán de los mismos pedidos): no se avisa aunque coincidan proveedor, fecha e importe.
   return gastos.find(x => x.id !== g.id && x.estado !== 'anulado' && (
     (num && normNumFactura_(x.num_factura) === num && (mismoProv(x) || (total && Number(x.total) === total))) ||
-    (total && mismoProv(x) && x.fecha === g.fecha && Number(x.total) === total)
+    (total && mismoProv(x) && x.fecha === g.fecha && Number(x.total) === total && !(num && normNumFactura_(x.num_factura)))
   )) || null;
 }
 
