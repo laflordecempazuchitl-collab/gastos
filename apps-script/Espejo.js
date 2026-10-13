@@ -7,10 +7,10 @@ function comprobarClaveEspejo_(p) {
 }
 
 // Ruta en el ordenador para cada carpeta de Drive:
-// Facturas/2026/2026-08/Makro -> 2026-08/Makro ; Cierres de caja/2026/2026-08 -> Cierres de caja/2026-08
+// Facturas/2026/2026-08/Makro -> 2026-08/Makro ; Cierres de caja/2026/2026-08 -> Cierres de caja/2026-08 (igual con Cierres Z)
 function rutaLocal_(partes) {
   if (partes[0] === 'Facturas') return partes.slice(2).join('/');
-  if (partes[0] === 'Cierres de caja') return ['Cierres de caja'].concat(partes.slice(2)).join('/');
+  if (partes[0] === 'Cierres de caja' || partes[0] === 'Cierres Z') return [partes[0]].concat(partes.slice(2)).join('/');
   return partes.join('/');
 }
 
@@ -27,7 +27,7 @@ function espejoLista_(p) {
       });
       (r.files || []).forEach(f => {
         if (f.mimeType === 'application/vnd.google-apps.folder') {
-          if (!(partes.length === 0 && f.name === 'Temporal')) recorrer(f.id, partes.concat(f.name));
+          if (f.id !== prop_('TEMPORAL_ID')) recorrer(f.id, partes.concat(f.name));
         } else if (!/^application\/vnd\.google-apps\./.test(f.mimeType)) {
           archivos.push({ id: f.id, nombre: f.name, ruta: rutaLocal_(partes), md5: f.md5Checksum, tam: Number(f.size) || 0, mod: f.modifiedTime });
         }

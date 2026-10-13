@@ -93,8 +93,8 @@ function normTexto_(s) {
 }
 
 function nombreSugerido_(lineas) {
-  const propio = /cempaz|la flor de|diana jocelin|cruz ortiz/i;
-  const ruido = /factura|recibo|fecha|cliente|n[º°]|tel[eé]f|www|@|c\/|calle|avda|direcci|p[aá]gina|^\d/i;
+  const propio = /cempaz|la flor de|diana jocelin|cruz ortiz|can bar[oó]/i;
+  const ruido = /factura|recibo|fecha|cliente|n[º°]|tel[eé]f|www|@|c\/|calle|avda|\bav\.?\s|avenida|avinguda|direcci|p[aá]gina|^\d/i;
   const primeras = lineas.slice(0, 12).filter(l => !propio.test(l));
   const sociedad = primeras.find(l => /\b(S\.?\s?L\.?\s?U?|S\.?\s?A\.?|S\.?\s?C\.?\s?P|S\.?\s?COOP|C\.?\s?B)\.?\s*$|sociedad/i.test(l) && l.length <= 60);
   if (sociedad) return sociedad.replace(/\s+/g, ' ');

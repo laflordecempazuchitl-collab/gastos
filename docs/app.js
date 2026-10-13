@@ -202,7 +202,7 @@ function ir(h) {
 }
 window.addEventListener('hashchange', e => {
   const viejo = decodeURIComponent((e.oldURL.split('#')[1] || 'inicio'));
-  if (!/^(revisar|anadir|cierre)/.test(viejo)) E.anterior = viejo;
+  if (!/^(revisar|anadir|cierre|z\/)/.test(viejo)) E.anterior = viejo;
   cerrarHoja();
   window.scrollTo(0, 0);
   pintar();
@@ -219,7 +219,7 @@ const svg = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 
 function pintarNav() {
   const nav = $('#nav');
-  const conNav = E.token && E.datos && !['revisar', 'anadir', 'cierre'].includes(ruta().p);
+  const conNav = E.token && E.datos && !['revisar', 'anadir', 'cierre'].includes(ruta().p) && !(ruta().p === 'z' && ruta().a);
   nav.hidden = !conNav;
   $('#app').classList.toggle('sin-nav', !conNav);
   if (!conNav) return;
@@ -247,7 +247,7 @@ function pintar() {
   const soloDueno = ['informes', 'proveedores'];
   if (soloDueno.includes(r.p) && !esDueno()) { location.hash = 'inicio'; return; }
   pintarNav();
-  const pantallas = { inicio: pintarInicio, anadir: pintarAnadir, revisar: pintarRevisar, cierre: pintarCierre, facturas: pintarFacturas, informes: pintarInformes, proveedores: pintarProveedores };
+  const pantallas = { inicio: pintarInicio, anadir: pintarAnadir, revisar: pintarRevisar, cierre: pintarCierre, z: pintarZ, facturas: pintarFacturas, informes: pintarInformes, proveedores: pintarProveedores };
   (pantallas[r.p] || pintarInicio)(r);
 }
 
@@ -321,6 +321,13 @@ function mesClave(desfase = 0) {
 }
 const nombreMes = clave => MESES[Number(clave.slice(5, 7)) - 1];
 
+// Acceso a los cierres Z (ticket Z de la caja registradora).
+function accesoZ() {
+  const mes = mesClave();
+  const n = cierresZ().filter(z => z.fecha.startsWith(mes)).length;
+  return `<a class="aviso-revisar" href="#z" style="background:#fff;color:inherit;border:1px solid var(--linea)"><span class="burbuja" style="background:#2A2118">Z</span><span>Cierres Z de la caja${n ? ` · ${n} en ${nombreMes(mes)}` : ''}</span><span style="margin-left:auto">›</span></a>`;
+}
+
 // Acceso al cierre de caja del día (o aviso de que ya está apuntado).
 function avisoCierre() {
   const f = fechaCierrePorDefecto();
@@ -362,7 +369,7 @@ function pintarInicio() {
 
   if (!esDueno()) {
     const ultimas = ordenados(gastos()).slice(0, 15);
-    app.innerHTML = cabecera + avisoCierre() + avisoPendientes +
+    app.innerHTML = cabecera + avisoCierre() + accesoZ() + avisoPendientes +
       `<a class="boton" href="#anadir" style="margin-bottom:16px">＋ Añadir factura</a>
       <div class="tarjeta"><h2>Últimas que has subido</h2>${ultimas.length ? `<ul class="lista">${ultimas.map(filaGasto).join('')}</ul>` : '<p class="vacio-estado">Todavía no has subido ninguna.</p>'}</div>`;
     return;
@@ -398,6 +405,7 @@ function pintarInicio() {
       <div class="leyenda">${Object.keys(GRUPOS).map(k => `<div><span class="punto" style="background:${k === 'proveedores' ? '#FCD9A8' : k === 'fijos' ? '#7FD1C7' : '#E9C2DF'}"></span>${GRUPOS[k]}<b>${eur(porGrupo[k])}</b></div>`).join('')}</div>
     </div>
     ${tarjetaCaja}
+    ${accesoZ()}
     ${porCat.length || sinCat.length ? `<div class="rejilla">${porCat.map(x => `
       <a class="cat-tarjeta g-${x.c.grupo}" href="#facturas/${encodeURIComponent(x.c.nombre)}" style="text-decoration:none;color:inherit">
         <div class="nombre">${esc(x.c.nombre)}</div><div class="importe">${eur(x.total)}</div><div class="tenue peque">${x.n} ${x.n === 1 ? 'factura' : 'facturas'}</div>
@@ -833,6 +841,138 @@ async function procesarFotoCierre(input) {
   pintar();
 }
 
+// ---------- Cierres Z (ticket Z de la caja registradora, para la gestoría) ----------
+
+const cierresZ = () => (E.datos && E.datos.cierresZ) || [];
+const sumarZ = (lista, k = 'total') => r2(lista.reduce((s, z) => s + (Number(z[k]) || 0), 0));
+
+function nuevoZForm(z) {
+  const f = {
+    id: z ? z.id : '', fecha: z ? z.fecha : fechaCierrePorDefecto(), num_z: z ? z.num_z : '',
+    total: z ? leerNum(z.total) : '', nota: z ? z.nota : '',
+    archivo_id: z ? z.archivo_id : '', archivo_url: z ? z.archivo_url : '', ocr_texto: ''
+  };
+  [4, 10, 21].forEach(t => { f['base_' + t] = z ? leerNum(z['base_' + t]) : ''; f['iva_' + t] = z ? leerNum(z['iva_' + t]) : ''; });
+  return f;
+}
+
+function pintarZ(r) {
+  if (!r.a) return pintarListaZ();
+  if (r.a !== 'nuevo') {
+    const z = cierresZ().find(x => x.id === r.a);
+    if (!z) { $('#app').innerHTML = '<div class="vacio-estado"><p>Este cierre Z ya no existe.</p><a class="boton" href="#z">Ver cierres Z</a></div>'; return; }
+    if (!E.z || E.z.id !== r.a) E.z = nuevoZForm(z);
+  } else if (!E.z || E.z.id) {
+    E.z = nuevoZForm(null);
+  }
+  const f = E.z;
+  const previa = E.vistaPrevia['z:' + (f.archivo_id || '')];
+  const sumaDesglose = r2([4, 10, 21].reduce((s, t) => s + (Number(f['base_' + t]) || 0) + (Number(f['iva_' + t]) || 0), 0));
+  const hayDesglose = [4, 10, 21].some(t => !vacio(f['base_' + t]) || !vacio(f['iva_' + t]));
+  const descuadre = hayDesglose && !vacio(f.total) && Math.abs(sumaDesglose - Number(f.total)) > 0.02;
+  const caja = cierreDe(f.fecha);
+  const numLimpio = String(f.num_z || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+  const repetido = cierresZ().find(z => z.id !== f.id &&
+    ((numLimpio && String(z.num_z) === numLimpio) || (!numLimpio && z.fecha === f.fecha && !vacio(f.total) && Number(z.total) === Number(f.total))));
+
+  const foto = previa || f.archivo_url
+    ? `<div class="tarjeta vista-previa">${previa ? `<img src="${previa}" alt="Ticket Z">` : '<span class="doc">Z</span>'}
+        <div style="flex:1"><b>Ticket Z</b><br>${f.archivo_url ? `<a href="${esc(f.archivo_url)}" target="_blank" rel="noopener">Ver</a> · ` : ''}<label for="in-z-galeria" class="enlace" style="padding:0">Cambiar</label></div></div>`
+    : `<label class="tarjeta" for="in-z-foto" style="display:flex;align-items:center;gap:14px;cursor:pointer;border:2px dashed var(--linea);box-shadow:none">
+        <span class="disparador" style="width:52px;height:52px;margin:0;border-width:4px;flex:none"></span>
+        <span style="flex:1"><b>Hacer foto del ticket Z</b><br><span class="tenue peque">Se guarda en Drive y se leen la fecha, el nº de Z, el total y el IVA.</span></span></label>
+      <label for="in-z-galeria" class="enlace" style="display:block;margin:-6px 0 12px">o elegir de la galería o un PDF</label>`;
+  const filaIva = t => `<span>IVA ${t} %</span>
+      <input class="entrada importe" inputmode="decimal" data-zc="base_${t}" value="${numCampo(f['base_' + t])}" placeholder="Base">
+      <input class="entrada importe" inputmode="decimal" data-zc="iva_${t}" value="${numCampo(f['iva_' + t])}" placeholder="Cuota">`;
+
+  $('#app').innerHTML = `
+    <div class="cabecera"><button class="volver" data-a="atrasZ" aria-label="Volver">‹</button>
+      <div style="flex:1"><p class="sub">${esc(mayuscula(fechaLarga(f.fecha)))}</p><h1>Cierre Z</h1></div></div>
+    ${foto}
+    <input type="file" id="in-z-foto" accept="image/*" capture="environment" data-z="1" hidden>
+    <input type="file" id="in-z-galeria" accept="image/*,application/pdf" data-z="1" hidden>
+    <div class="tarjeta">
+      <div class="dos">
+        <label class="campo"><span>Fecha del Z</span><input class="entrada" type="date" data-zc="fecha" value="${esc(f.fecha)}" max="${hoyISO()}"></label>
+        <label class="campo"><span>Nº de Z</span><input class="entrada" inputmode="numeric" data-zc="num_z" value="${esc(f.num_z)}" placeholder="Ej.: 245"></label>
+      </div>
+      ${repetido ? `<div class="descuadre">Este cierre Z parece estar ya apuntado (${repetido.num_z ? 'Z nº ' + esc(repetido.num_z) : fechaCorta(repetido.fecha)}). <a href="#z/${esc(repetido.id)}">Abrirlo</a></div>` : ''}
+      <label class="campo"><span>Total de ventas (con IVA)</span><input class="entrada importe" inputmode="decimal" data-zc="total" value="${numCampo(f.total)}" placeholder="0,00"></label>
+      <p class="tenue peque" style="margin:4px 0 8px">IVA de las ventas, tal como viene en el ticket Z:</p>
+      <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:8px;align-items:center">${filaIva(10)}${filaIva(21)}${filaIva(4)}</div>
+      ${descuadre ? `<p class="descuadre" style="margin-top:10px">Bases + cuotas suman ${eur(sumaDesglose)} y el total es ${eur(f.total)}. Revísalo con el ticket.</p>` : ''}
+      ${caja ? `<p class="tenue peque" style="margin:10px 0 0">Cierre de caja de ese día: ${esDueno() ? eur(caja.total) + (vacio(f.total) ? '' : ' · diferencia con el Z: ' + eur(r2(Number(f.total) - Number(caja.total)))) : 'apuntado'}</p>` : ''}
+    </div>
+    <div class="tarjeta"><label class="campo" style="margin:0"><span>Nota (opcional)</span><textarea class="entrada" data-zc="nota" placeholder="Ej.: Z de la caja manual">${esc(f.nota)}</textarea></label></div>
+    <div class="botones"><button class="boton secundario" data-a="atrasZ">Cancelar</button><button class="boton" data-a="guardarZ">Guardar cierre Z</button></div>
+    ${f.id && esDueno() ? '<button class="enlace" data-a="anularZ" style="display:block;margin:10px auto 0;color:var(--rojo)">Anular este cierre Z</button>' : ''}`;
+}
+
+function pintarListaZ() {
+  const mes = E.mesZ || mesClave();
+  const lista = cierresZ().filter(z => z.fecha.startsWith(mes))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha) || (Number(b.num_z) || 0) - (Number(a.num_z) || 0));
+  const ivas = [10, 21, 4].map(t => ({ t, b: sumarZ(lista, 'base_' + t), i: sumarZ(lista, 'iva_' + t) })).filter(x => x.b || x.i);
+  $('#app').innerHTML = `
+    <div class="cabecera"><button class="volver" data-a="atras" aria-label="Volver">‹</button><div style="flex:1"><p class="sub">Caja registradora</p><h1>Cierres Z</h1></div></div>
+    <div class="tarjeta" style="display:flex;align-items:center;justify-content:space-between">
+      <button class="enlace" data-a="mesZ" data-v="-1">‹ Anterior</button><b style="text-transform:capitalize">${nombreMes(mes)} ${mes.slice(0, 4)}</b>
+      <button class="enlace" data-a="mesZ" data-v="1" ${mes >= mesClave() ? 'disabled' : ''}>Siguiente ›</button></div>
+    <a class="boton" href="#z/nuevo" style="margin-bottom:12px">＋ Subir un cierre Z</a>
+    ${esDueno() && lista.length ? `<div class="tarjeta"><h2>Ventas del mes según los Z</h2><div class="resumen-iva">
+      ${ivas.map(x => `<span>IVA ${x.t} % (base / cuota)</span><b>${eur(x.b)} / ${eur(x.i)}</b>`).join('')}
+      <span style="font-weight:700">Total ventas</span><b>${eur(sumarZ(lista))}</b>
+      <span class="tenue">Cierres Z</span><b class="tenue">${lista.length}</b></div></div>` : ''}
+    <div class="tarjeta">${lista.length ? `<ul class="lista">${lista.map(z => `<li><a class="fila g-fijos" href="#z/${esc(z.id)}" style="text-decoration:none;color:inherit">
+      <span class="icono">Z</span>
+      <span class="medio"><span class="titulo" style="display:block">${esc(mayuscula(fechaLarga(z.fecha)))}</span><span class="detalle" style="display:block">${z.num_z ? 'Z nº ' + esc(z.num_z) : 'sin nº'}${z.archivo_id ? '' : ' · sin foto'}</span></span>
+      <span class="derecha importe">${esDueno() ? eur(z.total) : ''}</span></a></li>`).join('')}</ul>` : '<p class="vacio-estado">No hay cierres Z en este mes.</p>'}</div>`;
+}
+
+function campoZ(el) {
+  const f = E.z;
+  if (!f) return;
+  const c = el.dataset.zc;
+  if (c === 'fecha' || c === 'nota' || c === 'num_z') {
+    f[c] = el.value;
+    if (c === 'fecha' && el.value) pintar();
+    return;
+  }
+  f[c] = leerNum(el.value);
+}
+
+async function procesarFotoZ(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const f = E.z;
+  let blob = file, mime = file.type;
+  if (mime === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+    mime = 'application/pdf';
+  } else {
+    cargando('Preparando la foto…');
+    try { blob = await comprimir(file); } finally { cargando(false); }
+    mime = 'image/jpeg';
+  }
+  const r = await api('subirZ', { archivo: { base64: await aBase64(blob), mime }, fecha: f.fecha }, 'Guardando el ticket Z y leyéndolo…');
+  f.archivo_id = r.archivo_id;
+  f.archivo_url = r.archivo_url;
+  f.ocr_texto = r.ocr_texto || '';
+  if (mime.startsWith('image/')) E.vistaPrevia['z:' + r.archivo_id] = URL.createObjectURL(blob);
+  const l = r.lectura || {};
+  let leidos = 0;
+  if (!f.id && l.fecha && l.fecha <= hoyISO()) { f.fecha = l.fecha; leidos++; }
+  if (vacio(f.num_z) && l.num_z) { f.num_z = l.num_z; leidos++; }
+  if (vacio(f.total) && !vacio(l.total)) { f.total = l.total; leidos++; }
+  if (l.desglose) [4, 10, 21].forEach(t => {
+    const x = l.desglose[t];
+    if (x && vacio(f['base_' + t]) && vacio(f['iva_' + t])) { f['base_' + t] = x.base; f['iva_' + t] = x.iva; leidos++; }
+  });
+  avisar(leidos ? 'He leído el ticket Z. Comprueba los datos antes de guardar.' : 'Ticket guardado. Escribe los datos del Z.', leidos ? 'ok' : '');
+  pintar();
+}
+
 // ---------- Selector y formulario de proveedor (hoja inferior) ----------
 
 const H = { pintar: null, estado: null };
@@ -1142,6 +1282,7 @@ function informeCaja(p, r, ant, gastosPeriodo) {
     </div>
     <div class="tarjeta"><h2>${p.tipo === 'mes' ? 'Cierres del mes' : 'Mes a mes'}</h2>${detalle}</div>
     <a class="boton borde" href="#cierre/nuevo" style="margin-bottom:10px">＋ Apuntar un cierre</a>
+    <a class="boton borde" href="#z" style="margin-bottom:10px">🧾 Cierres Z (ventas para la gestoría)</a>
     <button class="boton secundario" data-a="exportar" data-v="xlsx">Descargar Excel (gastos y caja)</button>`;
 }
 
@@ -1212,7 +1353,7 @@ async function exportar(formato) {
   }
   cargando('Preparando el Excel…');
   try {
-    const datos = await construirExcel(lista, cierres().filter(c => enRango(c, r)));
+    const datos = await construirExcel(lista, cierres().filter(c => enRango(c, r)), cierresZ().filter(z => enRango(z, r)));
     await entregarArchivo(new Blob([datos], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), nombre + '.xlsx');
   } finally {
     cargando(false);
@@ -1220,7 +1361,7 @@ async function exportar(formato) {
 }
 
 // Devuelve el Excel (hojas "Gastos", "Resumen" y, si hay cierres, "Caja").
-async function construirExcel(lista, cierresPeriodo = []) {
+async function construirExcel(lista, cierresPeriodo = [], zPeriodo = []) {
   if (!window.XLSX) await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
   const filas = filasExportar(lista);
   {
@@ -1255,6 +1396,14 @@ async function construirExcel(lista, cierresPeriodo = []) {
       fila('INGRESOS (cierres de caja)', '', '', '', ingresos);
       fila('RESULTADO (ingresos − gastos)', '', '', '', r2(ingresos - sum(lista, 'total')));
     }
+    if (zPeriodo.length) {
+      fila('', '', '', '', '');
+      [10, 21, 4].forEach(t => {
+        const b = sumarZ(zPeriodo, 'base_' + t), i = sumarZ(zPeriodo, 'iva_' + t);
+        if (b || i) fila(`VENTAS (cierres Z) IVA ${t} %`, b, i, '', r2(b + i));
+      });
+      fila('VENTAS (cierres Z) TOTAL', '', '', '', sumarZ(zPeriodo));
+    }
     const hojaR = X.utils.json_to_sheet(resumen);
     formatearHoja(X, hojaR, ['Base', 'IVA', 'Retención', 'Total'], [30, 14, 14, 14, 14]);
 
@@ -1271,6 +1420,19 @@ async function construirExcel(lista, cierresPeriodo = []) {
       formatearHoja(X, hojaC, ['Efectivo', 'Datáfono', 'Total'], [12, 12, 12, 12, 30, 40]);
       X.utils.book_append_sheet(libro, hojaC, 'Caja');
     }
+    if (zPeriodo.length) {
+      const filasZ = zPeriodo.slice().sort((a, b) => a.fecha.localeCompare(b.fecha) || (Number(a.num_z) || 0) - (Number(b.num_z) || 0)).map(z => ({
+        'Fecha': new Date(z.fecha + 'T12:00:00'), 'Nº Z': z.num_z || '',
+        'Base 10%': Number(z.base_10) || 0, 'IVA 10%': Number(z.iva_10) || 0, 'Base 21%': Number(z.base_21) || 0, 'IVA 21%': Number(z.iva_21) || 0,
+        'Base 4%': Number(z.base_4) || 0, 'IVA 4%': Number(z.iva_4) || 0, 'Total ventas': Number(z.total) || 0, 'Nota': z.nota || '', 'Ticket': z.archivo_url || ''
+      }));
+      filasZ.push({ 'Fecha': 'TOTAL', 'Nº Z': '', 'Base 10%': sumarZ(zPeriodo, 'base_10'), 'IVA 10%': sumarZ(zPeriodo, 'iva_10'),
+        'Base 21%': sumarZ(zPeriodo, 'base_21'), 'IVA 21%': sumarZ(zPeriodo, 'iva_21'), 'Base 4%': sumarZ(zPeriodo, 'base_4'),
+        'IVA 4%': sumarZ(zPeriodo, 'iva_4'), 'Total ventas': sumarZ(zPeriodo), 'Nota': '', 'Ticket': '' });
+      const hojaZ = X.utils.json_to_sheet(filasZ, { cellDates: true, dateNF: 'dd/mm/yyyy' });
+      formatearHoja(X, hojaZ, ['Base 10%', 'IVA 10%', 'Base 21%', 'IVA 21%', 'Base 4%', 'IVA 4%', 'Total ventas'], [12, 8, 12, 10, 12, 10, 10, 10, 14, 30, 40]);
+      X.utils.book_append_sheet(libro, hojaZ, 'Ventas (Z)');
+    }
     return X.write(libro, { bookType: 'xlsx', type: 'array', cellDates: true });
   }
 }
@@ -1282,12 +1444,12 @@ function hojaGestoria(s) {
   const lista = gastos().filter(g => enRango(g, r));
   const pendientes = lista.filter(g => g.estado === 'por_revisar').length;
   return `<h2>Enviar a la gestoría</h2>
-    <p class="tenue" style="margin-top:-4px">${esc(r.nombre)} · ${lista.length} ${lista.length === 1 ? 'gasto' : 'gastos'} · ${eur(sumar(lista))}</p>
+    <p class="tenue" style="margin-top:-4px">${esc(r.nombre)} · ${lista.length} ${lista.length === 1 ? 'gasto' : 'gastos'} · ${eur(sumar(lista))}${cierresZ().some(z => enRango(z, r)) ? ` · ${cierresZ().filter(z => enRango(z, r)).length} cierres Z` : ''}</p>
     ${s.email && !s.cambiarCorreo
       ? `<p>Se enviará a <b>${esc(s.email)}</b> <button class="enlace" data-a="cambiarCorreoGestoria">Cambiar</button></p>`
       : `<label class="campo"><span>Correo de la gestoría</span><input class="entrada" type="email" inputmode="email" data-h="email" value="${esc(s.email || '')}" placeholder="gestoria@ejemplo.com" autocomplete="email"></label>`}
     <label class="campo"><span>Mensaje (opcional)</span><textarea class="entrada" data-h="mensaje" placeholder="Hola, te paso las facturas de ${esc(r.nombre)}.">${esc(s.mensaje || '')}</textarea></label>
-    <p class="tenue peque">Se enviará desde el Gmail del restaurante con el informe en Excel y todas las facturas del periodo adjuntas (PDF o foto). Si pesan mucho, llegarán en varios correos.</p>
+    <p class="tenue peque">Se enviará desde el Gmail del restaurante con el informe en Excel y todas las facturas y los tickets de cierre Z del periodo adjuntos (PDF o foto). Si pesan mucho, llegarán en varios correos.</p>
     ${pendientes ? `<p class="descuadre">Hay ${pendientes} ${pendientes === 1 ? 'gasto' : 'gastos'} por revisar en este periodo. Se enviarán igualmente, marcados como «Por revisar».</p>` : ''}
     <div class="dos"><button class="boton secundario" data-a="cerrarHoja">Cancelar</button><button class="boton verde" data-a="enviarGestoria">Enviar</button></div>`;
 }
@@ -1298,11 +1460,11 @@ async function enviarGestoria(permitirEnlace) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Escribe un correo válido.');
   const r = rango(E.periodo);
   const lista = gastos().filter(g => enRango(g, r));
-  if (!lista.length) throw new Error('No hay gastos en este periodo.');
+  if (!lista.length && !cierresZ().some(z => enRango(z, r))) throw new Error('No hay gastos ni cierres Z en este periodo.');
   cargando('Preparando el informe…');
   let excel;
   try {
-    excel = { base64: await aBase64(new Blob([await construirExcel(lista, cierres().filter(c => enRango(c, r)))])), nombre: 'Gastos La Flor - ' + r.nombre + '.xlsx' };
+    excel = { base64: await aBase64(new Blob([await construirExcel(lista, cierres().filter(c => enRango(c, r)), cierresZ().filter(z => enRango(z, r)))])), nombre: 'Gastos La Flor - ' + r.nombre + '.xlsx' };
   } finally {
     cargando(false);
   }
@@ -1319,7 +1481,7 @@ async function enviarGestoria(permitirEnlace) {
   E.datos.gestoria_email = email;
   guardarDatos();
   cerrarHoja();
-  avisar(`Enviado a ${email}: ${res.facturas || 0} facturas${res.correos > 1 ? ` en ${res.correos} correos` : ''}` +
+  avisar(`Enviado a ${email}: ${res.facturas || 0} facturas${res.cierresZ ? ` y ${res.cierresZ} cierres Z` : ''}${res.correos > 1 ? ` en ${res.correos} correos` : ''}` +
     (res.sinAdjuntar ? `. Ojo: ${res.sinAdjuntar} no se pudieron adjuntar.` : ' ✓'), res.sinAdjuntar ? 'error' : 'ok');
 }
 
@@ -1607,6 +1769,42 @@ const ACCIONES = {
     avisar('Cierre borrado', 'ok');
     location.hash = E.anterior || 'inicio';
   },
+  // Cierres Z
+  atrasZ: () => {
+    E.z = null;
+    if (history.length > 1) history.back(); else ir('z');
+  },
+  guardarZ: async () => {
+    const f = E.z;
+    if (vacio(f.total)) throw new Error('Escribe el total de ventas del Z.');
+    if (!f.archivo_id && !(await confirmar('Este cierre Z no tiene foto del ticket. ¿Guardarlo igualmente?', 'Guardar sin foto'))) return;
+    const r = await api('guardarZ', { z: f }, 'Guardando el cierre Z…');
+    const lista = E.datos.cierresZ = cierresZ();
+    const i = lista.findIndex(z => z.id === r.z.id);
+    if (i >= 0) lista[i] = r.z; else lista.push(r.z);
+    if (f.archivo_id && E.vistaPrevia['z:' + f.archivo_id]) E.vistaPrevia['z:' + r.z.archivo_id] = E.vistaPrevia['z:' + f.archivo_id];
+    guardarDatos();
+    E.z = null;
+    E.mesZ = r.z.fecha.slice(0, 7);
+    avisar(`Cierre Z del ${fechaCorta(r.z.fecha)} guardado ✓${esDueno() ? ' · ' + eur(r.z.total) : ''}`, 'ok');
+    location.hash = 'z';
+  },
+  anularZ: async () => {
+    if (!(await confirmar('¿Anular este cierre Z? Dejará de contar y de enviarse a la gestoría (la foto se guarda en «Anuladas»).', 'Anular', true))) return;
+    const id = E.z.id;
+    await api('anularZ', { id }, 'Anulando…');
+    E.datos.cierresZ = cierresZ().filter(z => z.id !== id);
+    guardarDatos();
+    E.z = null;
+    avisar('Cierre Z anulado', 'ok');
+    location.hash = 'z';
+  },
+  mesZ: el => {
+    const [a, m] = (E.mesZ || mesClave()).split('-').map(Number);
+    const d = new Date(a, m - 1 + Number(el.dataset.v), 1);
+    E.mesZ = d.getFullYear() + '-' + pad(d.getMonth() + 1);
+    pintar();
+  },
   vistaInforme: el => { E.vistaInforme = el.dataset.v; pintar(); },
   verCaja: () => { E.vistaInforme = 'caja'; E.periodo = periodoActual(); ir('informes'); },
 
@@ -1693,6 +1891,7 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.campo) campoForm(t);
   else if (t.dataset.cc) campoCierre(t);
+  else if (t.dataset.zc) campoZ(t);
   else if (t.dataset.h) {
     H.estado[t.dataset.h] = t.type === 'checkbox' ? t.checked : t.value;
     if (t.dataset.h === 'q') { const l = $('#hoja-lista'); if (l) l.innerHTML = listaSelector(t.value); }
@@ -1703,7 +1902,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.type === 'file') {
-    (t.dataset.cierre ? procesarFotoCierre(t) : procesarArchivo(t)).catch(err => { cargando(false); avisar(err.message, 'error'); });
+    (t.dataset.cierre ? procesarFotoCierre(t) : t.dataset.z ? procesarFotoZ(t) : procesarArchivo(t)).catch(err => { cargando(false); avisar(err.message, 'error'); });
   }
   else if (t.dataset.h && t.tagName === 'SELECT') H.estado[t.dataset.h] = t.value;
   else if (t.dataset.h && t.type === 'checkbox') H.estado[t.dataset.h] = t.checked;

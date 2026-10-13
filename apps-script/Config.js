@@ -54,12 +54,14 @@ const HOJAS = {
   Categorias: ['nombre', 'grupo', 'activo', 'creado_en'],
   Cierres: ['id', 'fecha', 'efectivo', 'tarjeta', 'total', 'nota', 'archivo_url', 'archivo_id',
     'creado_por', 'creado_en', 'modificado_en', 'ocr_texto'],
-  Correos: ['clave', 'fecha', 'remitente', 'asunto', 'adjunto', 'resultado', 'gasto_id']
+  Correos: ['clave', 'fecha', 'remitente', 'asunto', 'adjunto', 'resultado', 'gasto_id'],
+  CierresZ: ['id', 'fecha', 'num_z', 'total', 'base_4', 'iva_4', 'base_10', 'iva_10', 'base_21', 'iva_21',
+    'nota', 'estado', 'archivo_url', 'archivo_id', 'creado_por', 'creado_en', 'modificado_en', 'ocr_texto']
 };
 
 // Columnas que deben guardarse como texto (para que Sheets no las convierta en números).
 const COLUMNAS_TEXTO = ['id', 'proveedor_id', 'nif', 'num_factura', 'archivo_id', 'recurrente_id',
-  'creado_por', 'usuario_id', 'token_hash', 'pin_hash', 'sal', 'ultimo_mes', 'clave', 'gasto_id'];
+  'creado_por', 'usuario_id', 'token_hash', 'pin_hash', 'sal', 'ultimo_mes', 'clave', 'gasto_id', 'num_z'];
 const COLUMNAS_EUROS = ['base', 'iva_importe', 'retencion', 'total', 'importe', 'efectivo', 'tarjeta',
   'base_4', 'iva_4', 'base_10', 'iva_10', 'base_21', 'iva_21'];
 const TIPOS_DESGLOSE = [4, 10, 21];
