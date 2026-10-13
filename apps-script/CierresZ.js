@@ -1,4 +1,4 @@
-// Cierres Z de la caja registradora: el ticket Z de cada día con las ventas y su IVA (para la gestoría).
+// Cierres Z de la caja registradora: el ticket Z de cada día con las ventas y su IVA (archivo interno; no se envía a la gestoría).
 // Se guardan en Drive en "Cierres Z/AAAA/AAAA-MM". No se borran: si uno está mal, se anula.
 
 function carpetaZ_(fechaIso) {

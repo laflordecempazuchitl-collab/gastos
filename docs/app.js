@@ -841,7 +841,7 @@ async function procesarFotoCierre(input) {
   pintar();
 }
 
-// ---------- Cierres Z (ticket Z de la caja registradora, para la gestoría) ----------
+// ---------- Cierres Z (ticket Z de la caja registradora; archivo interno, no se envía a la gestoría) ----------
 
 const cierresZ = () => (E.datos && E.datos.cierresZ) || [];
 const sumarZ = (lista, k = 'total') => r2(lista.reduce((s, z) => s + (Number(z[k]) || 0), 0));
@@ -1305,7 +1305,7 @@ function informeCaja(p, r, ant, gastosPeriodo) {
     </div>
     <div class="tarjeta"><h2>${p.tipo === 'mes' ? 'Ventas de cada día' : 'Mes a mes'}</h2>${detalle}</div>
     <a class="boton borde" href="#cierre/nuevo" style="margin-bottom:10px">＋ Apuntar un cierre</a>
-    <a class="boton borde" href="#z" style="margin-bottom:10px">🧾 Cierres Z (ventas para la gestoría)</a>
+    <a class="boton borde" href="#z" style="margin-bottom:10px">🧾 Cierres Z (archivo de ventas)</a>
     <button class="boton secundario" data-a="exportar" data-v="xlsx">Descargar Excel (gastos y caja)</button>`;
 }
 
@@ -1468,12 +1468,12 @@ function hojaGestoria(s) {
   const lista = gastos().filter(g => enRango(g, r));
   const pendientes = lista.filter(g => g.estado === 'por_revisar').length;
   return `<h2>Enviar a la gestoría</h2>
-    <p class="tenue" style="margin-top:-4px">${esc(r.nombre)} · ${lista.length} ${lista.length === 1 ? 'gasto' : 'gastos'} · ${eur(sumar(lista))}${cierresZ().some(z => enRango(z, r)) ? ` · ${cierresZ().filter(z => enRango(z, r)).length} cierres Z` : ''}</p>
+    <p class="tenue" style="margin-top:-4px">${esc(r.nombre)} · ${lista.length} ${lista.length === 1 ? 'gasto' : 'gastos'} · ${eur(sumar(lista))}</p>
     ${s.email && !s.cambiarCorreo
       ? `<p>Se enviará a <b>${esc(s.email)}</b> <button class="enlace" data-a="cambiarCorreoGestoria">Cambiar</button></p>`
       : `<label class="campo"><span>Correo de la gestoría</span><input class="entrada" type="email" inputmode="email" data-h="email" value="${esc(s.email || '')}" placeholder="gestoria@ejemplo.com" autocomplete="email"></label>`}
     <label class="campo"><span>Mensaje (opcional)</span><textarea class="entrada" data-h="mensaje" placeholder="Hola, te paso las facturas de ${esc(r.nombre)}.">${esc(s.mensaje || '')}</textarea></label>
-    <p class="tenue peque">Se enviará desde el Gmail del restaurante con el informe en Excel y todas las facturas y los tickets de cierre Z del periodo adjuntos (PDF o foto). Si pesan mucho, llegarán en varios correos.</p>
+    <p class="tenue peque">Se enviará desde el Gmail del restaurante con el informe en Excel y todas las facturas del periodo adjuntas (PDF o foto). Los cierres Z y de caja no se envían. Si pesan mucho, llegarán en varios correos.</p>
     ${pendientes ? `<p class="descuadre">Hay ${pendientes} ${pendientes === 1 ? 'gasto' : 'gastos'} por revisar en este periodo. Se enviarán igualmente, marcados como «Por revisar».</p>` : ''}
     <div class="dos"><button class="boton secundario" data-a="cerrarHoja">Cancelar</button><button class="boton verde" data-a="enviarGestoria">Enviar</button></div>`;
 }
@@ -1484,11 +1484,11 @@ async function enviarGestoria(permitirEnlace) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Escribe un correo válido.');
   const r = rango(E.periodo);
   const lista = gastos().filter(g => enRango(g, r));
-  if (!lista.length && !cierresZ().some(z => enRango(z, r))) throw new Error('No hay gastos ni cierres Z en este periodo.');
+  if (!lista.length) throw new Error('No hay gastos en este periodo.');
   cargando('Preparando el informe…');
   let excel;
   try {
-    excel = { base64: await aBase64(new Blob([await construirExcel(lista, cierres().filter(c => enRango(c, r)), cierresZ().filter(z => enRango(z, r)))])), nombre: 'Gastos La Flor - ' + r.nombre + '.xlsx' };
+    excel = { base64: await aBase64(new Blob([await construirExcel(lista)])), nombre: 'Gastos La Flor - ' + r.nombre + '.xlsx' };
   } finally {
     cargando(false);
   }
@@ -1505,7 +1505,7 @@ async function enviarGestoria(permitirEnlace) {
   E.datos.gestoria_email = email;
   guardarDatos();
   cerrarHoja();
-  avisar(`Enviado a ${email}: ${res.facturas || 0} facturas${res.cierresZ ? ` y ${res.cierresZ} cierres Z` : ''}${res.correos > 1 ? ` en ${res.correos} correos` : ''}` +
+  avisar(`Enviado a ${email}: ${res.facturas || 0} facturas${res.correos > 1 ? ` en ${res.correos} correos` : ''}` +
     (res.sinAdjuntar ? `. Ojo: ${res.sinAdjuntar} no se pudieron adjuntar.` : ' ✓'), res.sinAdjuntar ? 'error' : 'ok');
 }
 
@@ -1814,7 +1814,7 @@ const ACCIONES = {
     location.hash = 'z';
   },
   anularZ: async () => {
-    if (!(await confirmar('¿Anular este cierre Z? Dejará de contar y de enviarse a la gestoría (la foto se guarda en «Anuladas»).', 'Anular', true))) return;
+    if (!(await confirmar('¿Anular este cierre Z? Dejará de contar en las ventas (la foto se guarda en «Anuladas»).', 'Anular', true))) return;
     const id = E.z.id;
     await api('anularZ', { id }, 'Anulando…');
     E.datos.cierresZ = cierresZ().filter(z => z.id !== id);

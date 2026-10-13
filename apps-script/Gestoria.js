@@ -1,5 +1,6 @@
 // Envío del informe y las facturas de un periodo a la gestoría.
 // Se manda el Excel (generado en el móvil) y TODAS las facturas del periodo (PDF o foto) como adjuntos.
+// Los cierres Z y los cierres de caja NO se envían: se quedan solo como archivo interno.
 // Si no caben en un correo, se reparten en varios ("parte 1 de 3"...). No se comparte ninguna carpeta.
 
 const MAX_CORREO_BYTES = 18 * 1024 * 1024;
@@ -14,7 +15,7 @@ function enviarGestoria_(u, p) {
 
   const gastos = leer_('Gastos').filter(g => g.estado !== 'anulado' && g.fecha >= p.desde && g.fecha <= p.hasta)
     .sort((a, b) => a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0);
-  if (!gastos.length && !leer_('CierresZ').some(z => z.estado !== 'anulado' && z.fecha >= p.desde && z.fecha <= p.hasta)) throw new Error('No hay gastos ni cierres Z en ese periodo.');
+  if (!gastos.length) throw new Error('No hay gastos en ese periodo.');
   const conArchivo = gastos.filter(g => g.archivo_id);
 
   // Cada factura con un nombre claro: "2026-08-04 Proveedor Nº.pdf".
@@ -33,22 +34,6 @@ function enviarGestoria_(u, p) {
     } catch (e) {
       console.error(e);
       fallan.push(g);
-    }
-  });
-
-  // Cierres Z del periodo (ventas): también van adjuntos.
-  const zs = leer_('CierresZ').filter(z => z.estado !== 'anulado' && z.fecha >= p.desde && z.fecha <= p.hasta)
-    .sort((a, b) => a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0);
-  zs.filter(z => z.archivo_id).forEach(z => {
-    try {
-      const blob = DriveApp.getFileById(z.archivo_id).getBlob();
-      const ext = (String(blob.getName()).match(/\.[a-z0-9]{2,5}$/i) || ['.' + (TIPOS_ARCHIVO[blob.getContentType()] || 'pdf')])[0].toLowerCase();
-      let base = 'Cierre Z ' + z.fecha + (z.num_z ? ' n' + z.num_z : '');
-      if (usados[base]) base += ' (' + (++usados[base]) + ')'; else usados[base] = 1;
-      blob.setName(base + ext);
-      facturas.push(blob);
-    } catch (e) {
-      console.error(e);
     }
   });
 
@@ -80,13 +65,7 @@ function enviarGestoria_(u, p) {
       ${suma('retencion') ? `<tr><td>Retenciones IRPF</td><td align="right">${eur(suma('retencion'))}</td></tr>` : ''}
       <tr><td><b>Total</b></td><td align="right"><b>${eur(suma('total'))}</b></td></tr>
     </table>
-    ${zs.length ? `<p><b>Ventas (cierres Z)</b></p>
-    <table cellpadding="4" style="border-collapse:collapse">
-      <tr><td>Nº de cierres Z</td><td align="right">${zs.length}</td></tr>
-      ${TIPOS_DESGLOSE.map(t => { const b = r2_(zs.reduce((s2, z) => s2 + (Number(z['base_' + t]) || 0), 0)), i = r2_(zs.reduce((s2, z) => s2 + (Number(z['iva_' + t]) || 0), 0)); return b || i ? `<tr><td>Base ${t} % / IVA repercutido</td><td align="right">${eur(b)} / ${eur(i)}</td></tr>` : ''; }).join('')}
-      <tr><td><b>Total ventas</b></td><td align="right"><b>${eur(r2_(zs.reduce((s2, z) => s2 + (Number(z.total) || 0), 0)))}</b></td></tr>
-    </table>` : ''}
-    <p>Adjunto el detalle en Excel y las ${facturas.length - zs.filter(z => z.archivo_id).length} facturas (PDF o foto)${zs.length ? ` y los ${zs.filter(z => z.archivo_id).length} tickets de cierre Z` : ''}${tandas.length > 1 ? `, repartidas en ${tandas.length} correos por tamaño` : ''}.</p>
+    <p>Adjunto el detalle en Excel y las ${facturas.length} facturas (PDF o foto)${tandas.length > 1 ? `, repartidas en ${tandas.length} correos por tamaño` : ''}.</p>
     ${fallan.length ? `<p style="color:#B42318">No se pudo adjuntar el archivo de ${fallan.length} gasto(s): ${fallan.map(g => escHtml(g.fecha + ' ' + (g.proveedor_nombre || ''))).join(', ')}.</p>` : ''}
     ${pendientes ? `<p style="color:#B42318">Aviso: ${pendientes} gasto(s) del periodo están pendientes de revisar.</p>` : ''}
     ${sinArchivo ? `<p style="color:#6B5E52">${sinArchivo} gasto(s) no tienen factura escaneada (por ejemplo, gastos apuntados a mano).</p>` : ''}
@@ -106,7 +85,7 @@ function enviarGestoria_(u, p) {
 
   PropertiesService.getScriptProperties().setProperty('GESTORIA_EMAIL', email);
   registrarEnvio_({ fecha: new Date(), periodo, email, n_gastos: gastos.length, total: suma('total'), enviado_por: u.nombre });
-  return { enviado: true, facturasAdjuntas: true, facturas: facturas.length - zs.filter(z => z.archivo_id).length, cierresZ: zs.length, correos: tandas.length, sinAdjuntar: fallan.length };
+  return { enviado: true, facturasAdjuntas: true, facturas: facturas.length, correos: tandas.length, sinAdjuntar: fallan.length };
 }
 
 function registrarEnvio_(fila) {
