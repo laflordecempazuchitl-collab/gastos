@@ -36,6 +36,7 @@ window.DEMO = (function () {
   ];
   const usuario = { id: 'u1', nombre: 'Dueño (demo)', rol: 'dueno', activo: true };
   const cierres = [];
+  const cierresZ = [];
   for (let i = 1; i <= 34; i++) {
     const fecha = f(0, hoy.getDate() - i);
     if (i % 9 === 4) continue; // algún día sin cierre
@@ -43,7 +44,7 @@ window.DEMO = (function () {
     cierres.push({ id: 'c' + i, fecha, efectivo, tarjeta, total: efectivo + tarjeta, nota: '', archivo_url: '', archivo_id: i % 2 ? 'x' : '', creado_por: 'u1' });
   }
   const datos = () => ({
-    version: 'demo', usuario, categorias, cierres: cierres.map(x => Object.assign({}, x)), gastos: gastos.map(x => Object.assign({}, x)), proveedores: proveedores.map(x => Object.assign({}, x)),
+    version: 'demo', usuario, categorias, cierres: cierres.map(x => Object.assign({}, x)), cierresZ: cierresZ.map(x => Object.assign({}, x)), gastos: gastos.map(x => Object.assign({}, x)), proveedores: proveedores.map(x => Object.assign({}, x)),
     recurrentes: [{ id: 'r1', concepto: 'Alquiler del local', proveedor_id: '', categoria: 'Alquiler', base: 1500, iva_pct: 21, retencion: 285, importe: 1530, dia_del_mes: 1, activo: true }],
     usuarios: [usuario, { id: 'u2', nombre: 'Lupita', rol: 'empleado', activo: true }]
   });
@@ -92,6 +93,20 @@ window.DEMO = (function () {
       case 'borrarCierre': {
         const i = cierres.findIndex(x => x.id === p.id);
         if (i >= 0) cierres.splice(i, 1);
+        return { ok: true };
+      }
+      case 'subirZ':
+        return { ok: true, archivo_id: 'z' + (++n), archivo_url: '#', leido: true, lectura: { num_z: '245', total: 412.3, desglose: { 10: { base: 374.82, iva: 37.48 } } } };
+      case 'guardarZ': {
+        const d = p.z;
+        let z = cierresZ.find(x => x.id === d.id);
+        if (!z) { z = { id: 'z' + (++n), creado_por: 'u1', estado: 'ok' }; cierresZ.push(z); }
+        Object.assign(z, d, { total: +d.total || 0 });
+        return { ok: true, z: Object.assign({}, z) };
+      }
+      case 'anularZ': {
+        const i = cierresZ.findIndex(x => x.id === p.id);
+        if (i >= 0) cierresZ.splice(i, 1);
         return { ok: true };
       }
       case 'enviarGestoria':
