@@ -1,10 +1,8 @@
 // Envío del informe y las facturas de un periodo a la gestoría.
-// Se adjunta el Excel (generado en el móvil) y se comparten las carpetas de los meses
-// del periodo SOLO con el correo de la gestora. Si su correo no es de Google, no se abre
-// nada sin permiso: se devuelve necesitaEnlace y la app pregunta antes de usar un enlace abierto.
+// Se manda el Excel (generado en el móvil) y TODAS las facturas del periodo (PDF o foto) como adjuntos.
+// Si no caben en un correo, se reparten en varios ("parte 1 de 3"...). No se comparte ninguna carpeta.
 
-const MAX_ADJUNTOS_BYTES = 15 * 1024 * 1024;
-const MAX_ADJUNTOS = 40;
+const MAX_CORREO_BYTES = 18 * 1024 * 1024;
 
 function enviarGestoria_(u, p) {
   soloDueno_(u);
@@ -14,51 +12,45 @@ function enviarGestoria_(u, p) {
   if (!p.excel || !p.excel.base64) throw new Error('Falta el informe.');
   const periodo = String(p.periodo || '').slice(0, 60);
 
-  const gastos = leer_('Gastos').filter(g => g.estado !== 'anulado' && g.fecha >= p.desde && g.fecha <= p.hasta);
+  const gastos = leer_('Gastos').filter(g => g.estado !== 'anulado' && g.fecha >= p.desde && g.fecha <= p.hasta)
+    .sort((a, b) => a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0);
   if (!gastos.length) throw new Error('No hay gastos en ese periodo.');
-
-  // Carpetas de los meses del periodo que tienen archivos.
-  const meses = [];
-  for (let d = new Date(p.desde + 'T12:00:00'); Utilities.formatDate(d, ZONA, 'yyyy-MM-dd') <= p.hasta; d.setMonth(d.getMonth() + 1)) {
-    meses.push(Utilities.formatDate(d, ZONA, 'yyyy-MM'));
-    d.setDate(1);
-  }
   const conArchivo = gastos.filter(g => g.archivo_id);
-  const carpetas = meses
-    .filter(m => conArchivo.some(g => g.fecha.slice(0, 7) === m))
-    .map(m => ({ mes: m, carpeta: carpetaMes_(m + '-01') }));
 
-  // Compartir solo con la gestora (o con enlace si se ha autorizado expresamente).
-  if (carpetas.length) {
+  // Cada factura con un nombre claro: "2026-08-04 Proveedor Nº.pdf".
+  const limpio = t => String(t || '').replace(/[\\/:*?"<>|]+/g, '-').trim();
+  const usados = {};
+  const facturas = [];
+  const fallan = [];
+  conArchivo.forEach(g => {
     try {
-      carpetas.forEach(c => c.carpeta.addViewer(email));
+      const blob = DriveApp.getFileById(g.archivo_id).getBlob();
+      const ext = (String(blob.getName()).match(/\.[a-z0-9]{2,5}$/i) || ['.' + (TIPOS_ARCHIVO[blob.getContentType()] || 'pdf')])[0].toLowerCase();
+      let base = [g.fecha, limpio(g.proveedor_nombre) || 'Sin proveedor', limpio(g.num_factura)].filter(Boolean).join(' ').slice(0, 120);
+      if (usados[base]) base += ' (' + (++usados[base]) + ')'; else usados[base] = 1;
+      blob.setName(base + ext);
+      facturas.push(blob);
     } catch (e) {
-      console.error('addViewer: ' + e);
-      if (!p.permitirEnlace) return { necesitaEnlace: true };
-      carpetas.forEach(c => c.carpeta.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW));
+      console.error(e);
+      fallan.push(g);
     }
-  }
+  });
 
-  // Adjuntos: el Excel siempre; las facturas también si caben.
-  const adjuntos = [Utilities.newBlob(Utilities.base64Decode(p.excel.base64),
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', p.excel.nombre || 'Gastos.xlsx')];
-  let facturasAdjuntas = false;
-  if (conArchivo.length <= MAX_ADJUNTOS) {
-    const archivos = conArchivo.map(g => { try { return DriveApp.getFileById(g.archivo_id); } catch (e) { return null; } }).filter(Boolean);
-    const tam = archivos.reduce((s, f) => s + f.getSize(), 0);
-    if (tam <= MAX_ADJUNTOS_BYTES) {
-      archivos.forEach(f => adjuntos.push(f.getBlob()));
-      facturasAdjuntas = true;
-    }
-  }
+  // Repartir en correos de hasta MAX_CORREO_BYTES (el Excel va en el primero).
+  const excel = Utilities.newBlob(Utilities.base64Decode(p.excel.base64),
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', p.excel.nombre || 'Gastos.xlsx');
+  const tandas = [[excel]];
+  let ocupado = excel.getBytes().length;
+  facturas.forEach(b => {
+    const t = b.getBytes().length;
+    if (ocupado + t > MAX_CORREO_BYTES && tandas[tandas.length - 1].length) { tandas.push([]); ocupado = 0; }
+    tandas[tandas.length - 1].push(b);
+    ocupado += t;
+  });
 
   const suma = k => r2_(gastos.reduce((s, g) => s + (Number(g[k]) || 0), 0));
   const pendientes = gastos.filter(g => g.estado === 'por_revisar').length;
   const sinArchivo = gastos.length - conArchivo.length;
-  const nombreMes = m => {
-    const n = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-    return n[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4);
-  };
   const eur = n => Number(n).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €';
   const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -72,24 +64,27 @@ function enviarGestoria_(u, p) {
       ${suma('retencion') ? `<tr><td>Retenciones IRPF</td><td align="right">${eur(suma('retencion'))}</td></tr>` : ''}
       <tr><td><b>Total</b></td><td align="right"><b>${eur(suma('total'))}</b></td></tr>
     </table>
-    <p>Adjunto el detalle en Excel${facturasAdjuntas ? ' y las facturas escaneadas' : ''}.</p>
-    ${carpetas.length ? `<p>Todas las facturas escaneadas, por meses:</p><ul>${carpetas.map(c => `<li><a href="${c.carpeta.getUrl()}">Facturas de ${nombreMes(c.mes)}</a></li>`).join('')}</ul>` : ''}
+    <p>Adjunto el detalle en Excel y las ${facturas.length} facturas (PDF o foto)${tandas.length > 1 ? `, repartidas en ${tandas.length} correos por tamaño` : ''}.</p>
+    ${fallan.length ? `<p style="color:#B42318">No se pudo adjuntar el archivo de ${fallan.length} gasto(s): ${fallan.map(g => escHtml(g.fecha + ' ' + (g.proveedor_nombre || ''))).join(', ')}.</p>` : ''}
     ${pendientes ? `<p style="color:#B42318">Aviso: ${pendientes} gasto(s) del periodo están pendientes de revisar.</p>` : ''}
     ${sinArchivo ? `<p style="color:#6B5E52">${sinArchivo} gasto(s) no tienen factura escaneada (por ejemplo, gastos apuntados a mano).</p>` : ''}
     <p style="color:#6B5E52;font-size:12px">Enviado desde la app de gastos por ${escHtml(u.nombre)}.</p>
   </div>`;
 
-  MailApp.sendEmail({
-    to: email,
-    subject: `Facturas ${periodo} — La Flor de Cempazúchitl`,
-    htmlBody: html,
-    name: 'La Flor de Cempazúchitl',
-    attachments: adjuntos
+  tandas.forEach((adjuntos, i) => {
+    const parte = tandas.length > 1 ? ` (parte ${i + 1} de ${tandas.length})` : '';
+    MailApp.sendEmail({
+      to: email,
+      subject: `Facturas ${periodo} — La Flor de Cempazúchitl${parte}`,
+      htmlBody: i === 0 ? html : `<div style="font-family:Arial,sans-serif;font-size:14px">Facturas de ${escHtml(periodo)}${parte}. El resumen y el Excel van en el primer correo.</div>`,
+      name: 'La Flor de Cempazúchitl',
+      attachments: adjuntos
+    });
   });
 
   PropertiesService.getScriptProperties().setProperty('GESTORIA_EMAIL', email);
   registrarEnvio_({ fecha: new Date(), periodo, email, n_gastos: gastos.length, total: suma('total'), enviado_por: u.nombre });
-  return { enviado: true, facturasAdjuntas, carpetas: carpetas.length };
+  return { enviado: true, facturasAdjuntas: true, facturas: facturas.length, correos: tandas.length, sinAdjuntar: fallan.length };
 }
 
 function registrarEnvio_(fila) {

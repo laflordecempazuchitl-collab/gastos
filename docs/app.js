@@ -1283,9 +1283,11 @@ function hojaGestoria(s) {
   const pendientes = lista.filter(g => g.estado === 'por_revisar').length;
   return `<h2>Enviar a la gestoría</h2>
     <p class="tenue" style="margin-top:-4px">${esc(r.nombre)} · ${lista.length} ${lista.length === 1 ? 'gasto' : 'gastos'} · ${eur(sumar(lista))}</p>
-    <label class="campo"><span>Correo de la gestoría</span><input class="entrada" type="email" inputmode="email" data-h="email" value="${esc(s.email || '')}" placeholder="gestoria@ejemplo.com" autocomplete="email"></label>
+    ${s.email && !s.cambiarCorreo
+      ? `<p>Se enviará a <b>${esc(s.email)}</b> <button class="enlace" data-a="cambiarCorreoGestoria">Cambiar</button></p>`
+      : `<label class="campo"><span>Correo de la gestoría</span><input class="entrada" type="email" inputmode="email" data-h="email" value="${esc(s.email || '')}" placeholder="gestoria@ejemplo.com" autocomplete="email"></label>`}
     <label class="campo"><span>Mensaje (opcional)</span><textarea class="entrada" data-h="mensaje" placeholder="Hola, te paso las facturas de ${esc(r.nombre)}.">${esc(s.mensaje || '')}</textarea></label>
-    <p class="tenue peque">Se enviará desde el Gmail del restaurante con el informe en Excel y un enlace a las facturas escaneadas, compartidas solo con ese correo.</p>
+    <p class="tenue peque">Se enviará desde el Gmail del restaurante con el informe en Excel y todas las facturas del periodo adjuntas (PDF o foto). Si pesan mucho, llegarán en varios correos.</p>
     ${pendientes ? `<p class="descuadre">Hay ${pendientes} ${pendientes === 1 ? 'gasto' : 'gastos'} por revisar en este periodo. Se enviarán igualmente, marcados como «Por revisar».</p>` : ''}
     <div class="dos"><button class="boton secundario" data-a="cerrarHoja">Cancelar</button><button class="boton verde" data-a="enviarGestoria">Enviar</button></div>`;
 }
@@ -1317,7 +1319,8 @@ async function enviarGestoria(permitirEnlace) {
   E.datos.gestoria_email = email;
   guardarDatos();
   cerrarHoja();
-  avisar(`Enviado a ${email} ✓`, 'ok');
+  avisar(`Enviado a ${email}: ${res.facturas || 0} facturas${res.correos > 1 ? ` en ${res.correos} correos` : ''}` +
+    (res.sinAdjuntar ? `. Ojo: ${res.sinAdjuntar} no se pudieron adjuntar.` : ' ✓'), res.sinAdjuntar ? 'error' : 'ok');
 }
 
 // ---------- Cambiar PIN ----------
@@ -1670,6 +1673,7 @@ const ACCIONES = {
     avisar('Guardado', 'ok');
     pintar();
   },
+  cambiarCorreoGestoria: () => { H.estado.cambiarCorreo = true; repintarHoja(); },
   cerrarHoja: () => cerrarHoja()
 };
 
