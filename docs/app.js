@@ -591,9 +591,12 @@ function pintarRevisar(r) {
   const puedeRepetir = f.estado === 'por_revisar' && ['foto', 'galeria', 'pdf'].includes(f.origen);
   const delCorreo = f.estado === 'por_revisar' && f.origen === 'correo';
   const dup = sug.duplicado && gastos().find(x => x.id === sug.duplicado.id);
-  const avisoDup = dup ? `<div class="descuadre"><b>Esta factura ya está apuntada</b>: ${esc(dup.proveedor_nombre || dup.categoria || '')} del ${fechaCorta(dup.fecha)} por ${eur(dup.total)}${dup.origen === 'correo' ? ' (llegó por correo)' : ''}.
+  const avisoDup = dup ? `<div class="descuadre"><b>Parece la misma compra que otro documento ya apuntado</b>: ${esc(dup.proveedor_nombre || dup.categoria || '')} del ${fechaCorta(dup.fecha)} por ${eur(dup.total)}${dup.num_factura ? ' (nº ' + esc(dup.num_factura) + ')' : ''}${dup.origen === 'correo' ? ', llegó por correo' : ''}.
+      ${dup.nota ? `<div class="peque" style="margin-top:4px">${esc(dup.nota)}</div>` : ''}
       <div class="dos" style="margin-top:10px"><a class="boton secundario" href="#revisar/${esc(dup.id)}" style="min-height:44px;font-size:15px">Ver la otra</a>
-      <button class="boton peligro" data-a="descartarCopia" style="min-height:44px;font-size:15px">Descartar esta</button></div></div>` : '';
+      <button class="boton peligro" data-a="descartarCopia" style="min-height:44px;font-size:15px">Descartar esta</button></div>
+      ${esDueno() ? `<button class="boton" data-a="sustituirOtra" data-id="${esc(dup.id)}" style="min-height:44px;font-size:15px;margin-top:8px">Quedarme con esta y anular la otra</button>` : ''}
+      <div class="peque" style="margin-top:6px">Si no es la misma compra, revisa los datos y pulsa «Guardar gasto» sin más.</div></div>` : '';
 
   $('#app').innerHTML = `
     <div class="cabecera"><button class="volver" data-a="atras" aria-label="Volver">‹</button>
@@ -1536,6 +1539,19 @@ const ACCIONES = {
     guardarDatos();
     E.form = null;
     location.replace('#anadir');
+  },
+  // Para cuando llega la factura de algo ya apuntado como albarán: se anula el otro y se sigue con esta.
+  sustituirOtra: async el => {
+    const otra = gastos().find(g => g.id === el.dataset.id);
+    if (!otra) throw new Error('El otro documento ya no existe.');
+    if (!(await confirmar(`¿Anular el documento anterior (${otra.proveedor_nombre || ''} ${otra.num_factura || ''}, ${eur(otra.total)}) y quedarte con este? El anulado deja de contar pero se conserva en la hoja.`, 'Anular el otro', true))) return;
+    await api('anular', { id: otra.id }, 'Anulando el otro…');
+    E.datos.gastos = gastos().filter(g => g.id !== otra.id);
+    const s = E.sugerencia[E.form.id];
+    if (s) { s.duplicado = null; guardarLS('sugerencias', E.sugerencia); }
+    guardarDatos();
+    avisar('Anulado. Ahora revisa esta factura y pulsa «Guardar gasto».', 'ok');
+    pintar();
   },
   descartarCopia: async () => {
     if (!(await confirmar('¿Descartar esta factura? Se quitará de la lista y su archivo irá a la papelera de Drive.', 'Descartar', true))) return;
