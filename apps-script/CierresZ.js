@@ -69,7 +69,7 @@ function guardarZ_(u, p) {
     const repetido = todos.find(z => String(z.id) !== String(d.id || '') &&
       ((num && String(z.num_z) === num) || (!num && z.fecha === d.fecha && Number(z.total) === total)));
     if (repetido && !d.forzar) throw new Error(`Ese cierre Z ya está apuntado (${num ? 'Z nº ' + num : 'mismo día e importe'}, del ${repetido.fecha.split('-').reverse().join('/')}).`);
-    const cambios = { fecha: d.fecha, num_z: num, total, nota: String(d.nota || '').slice(0, 500), modificado_en: new Date() };
+    const cambios = { fecha: d.fecha, num_z: num, total, efectivo: numero_(d.efectivo), tarjeta: numero_(d.tarjeta), nota: String(d.nota || '').slice(0, 500), modificado_en: new Date() };
     TIPOS_DESGLOSE.forEach(t => {
       const b = numero_(d['base_' + t]), i = numero_(d['iva_' + t]);
       cambios['base_' + t] = b;

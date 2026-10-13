@@ -56,7 +56,8 @@ const HOJAS = {
     'creado_por', 'creado_en', 'modificado_en', 'ocr_texto'],
   Correos: ['clave', 'fecha', 'remitente', 'asunto', 'adjunto', 'resultado', 'gasto_id'],
   CierresZ: ['id', 'fecha', 'num_z', 'total', 'base_4', 'iva_4', 'base_10', 'iva_10', 'base_21', 'iva_21',
-    'nota', 'estado', 'archivo_url', 'archivo_id', 'creado_por', 'creado_en', 'modificado_en', 'ocr_texto']
+    'nota', 'estado', 'archivo_url', 'archivo_id', 'creado_por', 'creado_en', 'modificado_en', 'ocr_texto',
+    'efectivo', 'tarjeta']
 };
 
 // Columnas que deben guardarse como texto (para que Sheets no las convierta en números).

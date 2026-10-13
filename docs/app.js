@@ -386,12 +386,12 @@ function pintarInicio() {
     .filter(x => x.n > 0)
     .sort((a, b) => b.total - a.total);
   const sinCat = delMes.filter(g => !g.categoria);
-  const ingresosMes = sumarCaja(cierres().filter(c => c.fecha.startsWith(mes)));
+  const ingresosMes = ingresosDe({ desde: mes + '-01', hasta: mes + '-31' });
   const resultadoMes = r2(ingresosMes - total);
   const tarjetaCaja = `<button class="tarjeta" data-a="verCaja" style="display:block;width:100%;text-align:left;border:0;cursor:pointer">
       <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="margin:0">Caja de ${nombreMes(mes)}</h2><span class="peque" style="color:var(--ambar);font-weight:600">Ver resultados ›</span></div>
       <div class="resumen-iva" style="margin-top:10px">
-        <span>Ingresos (cierres)</span><b>${eur(ingresosMes)}</b>
+        <span>Ingresos (ventas)</span><b>${eur(ingresosMes)}</b>
         <span>Gastos</span><b>− ${eur(total)}</b>
         <span style="font-weight:700">Resultado</span><b style="color:${resultadoMes >= 0 ? 'var(--ok)' : 'var(--rojo)'}">${eur(resultadoMes)}</b>
       </div></button>`;
@@ -849,7 +849,7 @@ const sumarZ = (lista, k = 'total') => r2(lista.reduce((s, z) => s + (Number(z[k
 function nuevoZForm(z) {
   const f = {
     id: z ? z.id : '', fecha: z ? z.fecha : fechaCierrePorDefecto(), num_z: z ? z.num_z : '',
-    total: z ? leerNum(z.total) : '', nota: z ? z.nota : '',
+    total: z ? leerNum(z.total) : '', efectivo: z ? leerNum(z.efectivo) : '', tarjeta: z ? leerNum(z.tarjeta) : '', nota: z ? z.nota : '',
     archivo_id: z ? z.archivo_id : '', archivo_url: z ? z.archivo_url : '', ocr_texto: ''
   };
   [4, 10, 21].forEach(t => { f['base_' + t] = z ? leerNum(z['base_' + t]) : ''; f['iva_' + t] = z ? leerNum(z['iva_' + t]) : ''; });
@@ -899,6 +899,10 @@ function pintarZ(r) {
       </div>
       ${repetido ? `<div class="descuadre">Este cierre Z parece estar ya apuntado (${repetido.num_z ? 'Z nº ' + esc(repetido.num_z) : fechaCorta(repetido.fecha)}). <a href="#z/${esc(repetido.id)}">Abrirlo</a></div>` : ''}
       <label class="campo"><span>Total de ventas (con IVA)</span><input class="entrada importe" inputmode="decimal" data-zc="total" value="${numCampo(f.total)}" placeholder="0,00"></label>
+      <div class="dos">
+        <label class="campo"><span>💶 Efectivo</span><input class="entrada importe" inputmode="decimal" data-zc="efectivo" value="${numCampo(f.efectivo)}" placeholder="0,00"></label>
+        <label class="campo"><span>💳 Tarjeta</span><input class="entrada importe" inputmode="decimal" data-zc="tarjeta" value="${numCampo(f.tarjeta)}" placeholder="0,00"></label>
+      </div>
       <p class="tenue peque" style="margin:4px 0 8px">IVA de las ventas, tal como viene en el ticket Z:</p>
       <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:8px;align-items:center">${filaIva(10)}${filaIva(21)}${filaIva(4)}</div>
       ${descuadre ? `<p class="descuadre" style="margin-top:10px">Bases + cuotas suman ${eur(sumaDesglose)} y el total es ${eur(f.total)}. Revísalo con el ticket.</p>` : ''}
@@ -1206,23 +1210,42 @@ function pintarInformes() {
     </div>`;
 }
 
-// Pestaña "Caja y resultados": ingresos de los cierres frente a los gastos del mismo periodo.
+// Ingresos de cada día del periodo: si hay cierre Z se usan sus ventas; si no, el cierre de caja (sobre).
+function diasIngreso(r) {
+  const dias = {};
+  cierresZ().filter(z => enRango(z, r)).forEach(z => {
+    const d = dias[z.fecha] || (dias[z.fecha] = { fecha: z.fecha, fuente: 'z', total: 0, efectivo: 0, tarjeta: 0, zs: [] });
+    d.total = r2(d.total + (Number(z.total) || 0));
+    d.efectivo = r2(d.efectivo + (Number(z.efectivo) || 0));
+    d.tarjeta = r2(d.tarjeta + (Number(z.tarjeta) || 0));
+    d.zs.push(z);
+  });
+  cierres().filter(c => enRango(c, r) && !dias[c.fecha]).forEach(c => {
+    dias[c.fecha] = { fecha: c.fecha, fuente: 'caja', total: Number(c.total) || 0, efectivo: Number(c.efectivo) || 0, tarjeta: Number(c.tarjeta) || 0, cierre: c };
+  });
+  return Object.values(dias).sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+const ingresosDe = r => sumarCaja(diasIngreso(r));
+
+// Pestaña "Caja y resultados": ingresos (cierres Z o de caja) frente a los gastos del mismo periodo.
 function informeCaja(p, r, ant, gastosPeriodo) {
-  const lista = cierres().filter(c => enRango(c, r));
+  const lista = diasIngreso(r);
   const ingresos = sumarCaja(lista), efectivo = sumarCaja(lista, 'efectivo'), tarjeta = sumarCaja(lista, 'tarjeta');
+  const conZ = lista.filter(d => d.fuente === 'z').length;
   const gastosTot = sumar(gastosPeriodo);
   const compras = sumar(gastosPeriodo.filter(g => grupoDe(g.categoria) === 'proveedores'));
   const resultado = r2(ingresos - gastosTot);
-  const resultadoAnt = r2(sumarCaja(cierres().filter(c => enRango(c, ant))) - sumar(gastosLista(ant)));
+  const resultadoAnt = r2(ingresosDe(ant) - sumar(gastosLista(ant)));
   const pct = (a, b) => b > 0 ? Math.round(a / b * 100) : 0;
 
   // Días sin cierre (del periodo, hasta ayer)
   // (se cuenta desde el primer cierre apuntado, para no avisar de días anteriores a usar la app)
   const hasta = r.hasta < hoyISO() ? r.hasta : sumarDias(hoyISO(), -1);
-  const primero = cierres().map(c => c.fecha).sort()[0];
+  const primero = cierres().map(c => c.fecha).concat(cierresZ().map(z => z.fecha)).sort()[0];
+  const conIngreso = new Set(lista.map(d => d.fecha));
   const faltan = [];
   if (primero) {
-    for (let d = r.desde > primero ? r.desde : primero; d <= hasta; d = sumarDias(d, 1)) if (!cierreDe(d)) faltan.push(d);
+    for (let d = r.desde > primero ? r.desde : primero; d <= hasta; d = sumarDias(d, 1)) if (!conIngreso.has(d)) faltan.push(d);
   }
 
   const barra = (texto, valor, total, color) => `<div class="barra-cat"><div class="cab"><span>${texto}</span><b>${pct(valor, total)} %</b></div>
@@ -1231,17 +1254,17 @@ function informeCaja(p, r, ant, gastosPeriodo) {
   // Detalle: por día en un mes; por mes en trimestre y año.
   let detalle;
   if (p.tipo === 'mes') {
-    detalle = lista.length ? `<ul class="lista">${lista.slice().sort((a, b) => b.fecha.localeCompare(a.fecha)).map(c => `<li><a class="fila g-fijos" href="#cierre/${esc(c.id)}" style="text-decoration:none;color:inherit">
-      <span class="icono">${Number(c.fecha.slice(8))}</span>
-      <span class="medio"><span class="titulo" style="display:block">${esc(mayuscula(fechaLarga(c.fecha)))}</span><span class="detalle" style="display:block">💶 ${eur(c.efectivo)} · 💳 ${eur(c.tarjeta)}${c.archivo_id ? '' : ' · sin foto'}</span></span>
-      <span class="derecha importe">${eur(c.total)}</span></a></li>`).join('')}</ul>` : '<p class="vacio-estado">No hay cierres apuntados en este mes.</p>';
+    detalle = lista.length ? `<ul class="lista">${lista.slice().reverse().map(d => `<li><a class="fila g-fijos" href="${d.fuente === 'z' ? '#z/' + esc(d.zs[0].id) : '#cierre/' + esc(d.cierre.id)}" style="text-decoration:none;color:inherit">
+      <span class="icono">${Number(d.fecha.slice(8))}</span>
+      <span class="medio"><span class="titulo" style="display:block">${esc(mayuscula(fechaLarga(d.fecha)))}</span><span class="detalle" style="display:block">${d.fuente === 'z' ? 'Z nº ' + d.zs.map(z => esc(z.num_z)).join(', ') : 'Cierre de caja'} · 💶 ${eur(d.efectivo)} · 💳 ${eur(d.tarjeta)}</span></span>
+      <span class="derecha importe">${eur(d.total)}</span></a></li>`).join('')}</ul>` : '<p class="vacio-estado">No hay cierres en este mes.</p>';
   } else {
     const meses = [];
     for (let d = r.desde; d <= r.hasta; d = sumarDias(d.slice(0, 7) + '-28', 7).slice(0, 7) + '-01') meses.push(d.slice(0, 7));
     detalle = `<div class="resumen-iva" style="grid-template-columns:1fr auto auto auto;gap:8px 12px">
       <span class="tenue peque">Mes</span><b class="tenue peque">Ingresos</b><b class="tenue peque">Gastos</b><b class="tenue peque">Resultado</b>
       ${meses.map(m => {
-        const i = sumarCaja(cierres().filter(c => c.fecha.startsWith(m)));
+        const i = ingresosDe({ desde: m + '-01', hasta: m + '-31' });
         const g = sumar(gastos().filter(x => (x.fecha || '').startsWith(m)));
         return `<span style="text-transform:capitalize">${nombreMes(m)}</span><b>${eur(i)}</b><b>${eur(g)}</b><b style="color:${i - g >= 0 ? 'var(--ok)' : 'var(--rojo)'}">${eur(i - g)}</b>`;
       }).join('')}</div>`;
@@ -1267,7 +1290,7 @@ function informeCaja(p, r, ant, gastosPeriodo) {
         <span>💶 Efectivo</span><b>${eur(efectivo)}</b>
         <span>💳 Datáfono</span><b>${eur(tarjeta)}</b>
         <span style="font-weight:700">Total</span><b>${eur(ingresos)}</b>
-        <span class="tenue">Días con cierre</span><b class="tenue">${lista.length}</b>
+        <span class="tenue">Días con ventas</span><b class="tenue">${lista.length}${conZ ? ` (${conZ} con cierre Z)` : ''}</b>
         <span class="tenue">Media por día</span><b class="tenue">${eur(lista.length ? ingresos / lista.length : 0)}</b>
       </div>
     </div>
@@ -1277,10 +1300,10 @@ function informeCaja(p, r, ant, gastosPeriodo) {
         barra('Gastos fijos', sumar(gastosPeriodo.filter(g => grupoDe(g.categoria) === 'fijos')), ingresos, COLOR_GRUPO.fijos) +
         barra('Varios', sumar(gastosPeriodo.filter(g => grupoDe(g.categoria) === 'varios')), ingresos, COLOR_GRUPO.varios) +
         barra('Total de gastos', gastosTot, ingresos, '#2A2118')
-        : '<p class="vacio-estado">Apunta los cierres de caja para ver este cálculo.</p>'}
+        : '<p class="vacio-estado">Sube los cierres Z (o apunta los cierres de caja) para ver este cálculo.</p>'}
       <p class="tenue peque" style="margin:8px 0 0">Importes con IVA. Es una aproximación: solo cuenta los gastos apuntados en la app (no incluye nóminas ni seguros sociales si no los apuntas).</p>
     </div>
-    <div class="tarjeta"><h2>${p.tipo === 'mes' ? 'Cierres del mes' : 'Mes a mes'}</h2>${detalle}</div>
+    <div class="tarjeta"><h2>${p.tipo === 'mes' ? 'Ventas de cada día' : 'Mes a mes'}</h2>${detalle}</div>
     <a class="boton borde" href="#cierre/nuevo" style="margin-bottom:10px">＋ Apuntar un cierre</a>
     <a class="boton borde" href="#z" style="margin-bottom:10px">🧾 Cierres Z (ventas para la gestoría)</a>
     <button class="boton secundario" data-a="exportar" data-v="xlsx">Descargar Excel (gastos y caja)</button>`;
@@ -1390,10 +1413,11 @@ async function construirExcel(lista, cierresPeriodo = [], zPeriodo = []) {
     });
     const sinTipo = lista.filter(g => !conDesglose(g) && (vacio(g.iva_pct) || ![4, 10, 21].includes(Number(g.iva_pct))));
     if (sinTipo.length) fila('Sin desglose de IVA', sum(sinTipo, 'base'), sum(sinTipo, 'iva_importe'), sum(sinTipo, 'retencion'), sum(sinTipo, 'total'));
-    if (cierresPeriodo.length) {
-      const ingresos = sumarCaja(cierresPeriodo);
+    if (cierresPeriodo.length || zPeriodo.length) {
+      const fechasZ = new Set(zPeriodo.map(z => z.fecha));
+      const ingresos = r2(sumarZ(zPeriodo) + sumarCaja(cierresPeriodo.filter(c => !fechasZ.has(c.fecha))));
       fila('', '', '', '', '');
-      fila('INGRESOS (cierres de caja)', '', '', '', ingresos);
+      fila(zPeriodo.length ? 'INGRESOS (ventas: cierres Z y, si no hay Z, cierre de caja)' : 'INGRESOS (cierres de caja)', '', '', '', ingresos);
       fila('RESULTADO (ingresos − gastos)', '', '', '', r2(ingresos - sum(lista, 'total')));
     }
     if (zPeriodo.length) {
